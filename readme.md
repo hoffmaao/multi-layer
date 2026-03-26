@@ -1,24 +1,18 @@
 # multilayer
 
-A multilayer ice-flow model generalising the shallow shelf approximation, implemented in the dual form of [icepack2](https://github.com/icepack/icepack2).
-
-This package implements the multilayer model described in [Jouvet (2015)](https://doi.org/10.1017/jfm.2014.689).
-The idea is to split the ice column into a stack of thin layers, each with its own horizontal velocity.
+This package implements the multilayer model described in [Jouvet (2015)](https://doi.org/10.1017/jfm.2014.689), which splits the ice column into a stack of thin layers, each with its own horizontal velocity.
 Adjacent layers are coupled through interlayer shear tractions.
-For a single layer the model reduces to the shallow shelf approximation (SSA); as the number of layers increases, the solution converges to the Stokes solution.
+For a single layer the model reduces to the shallow shelf approximation (SSA); as the number of layers increases, the solution converges to other hybridized stokes solutions.
 
 Unlike the SSA, which treats the ice as a plug, the multilayer model captures vertical shear.
-This matters wherever basal drag is significant — near grounding lines, in ice streams, and in regions with strong bed topography.
-
-The model uses the **dual formulation** from icepack2, where membrane stress and interlayer shear stress are explicit unknowns alongside velocity.
-This formulation is well-posed at zero thickness, which enables natural handling of calving fronts and terminus evolution.
+This matters wherever basal drag is significant (near grounding lines, in ice streams, and in regions with strong bed topography). The model uses the **dual formulation** from [icepack2](https://github.com/icepack/icepack2), where membrane stress and interlayer shear stress are explicit unknowns alongside velocity.
+This formulation is well-posed at zero thickness, which enables natural handling of calving fronts terminus evolution, and areas where layers thin to zero (over nunataks for instance).
 
 
 ## Multilayer momentum balance
 
-The core contribution is extending icepack2's dual-form SSA to multiple layers.
 Each layer has three fields: velocity, membrane stress, and interlayer stress.
-The interlayer stress has the same mathematical structure as a friction law — it relates the shear stress at an interface to the normalised velocity jump between layers.
+The interlayer stress has the same mathematical structure as a friction law --it relates the shear stress at an interface to the normalised velocity between layers.
 
 The action functional is:
 
@@ -31,10 +25,10 @@ Taking the Gateaux derivative of the total action recovers all the weak-form equ
 
 ## Composite rheology
 
-Ice near the bed deforms primarily by dislocation creep ($n = 4$), while the colder upper ice deforms by grain boundary sliding ($n = 1.8$).
+Ice near the bed may deform via different mechanisms than ice near the surface (i.e.by dislocation creep, $n = 4$ vs. while  grain boundary sliding, $n = 1.8$).
 The standard Glen's law with $n = 3$ is an effective average of these two mechanisms (Goldsby & Kohlstedt 2001, Behn et al. 2021, Ranganathan & Minchew 2024).
 
-The multilayer model naturally accommodates per-layer rheology.
+The multilayer model naturally accommodates rheologies that change as a function of depth.
 We can assign different stress exponents and rate factors to each layer, representing the transition from warm basal ice (large recrystallised grains, dislocation creep) to cold upper ice (smaller grains, grain boundary sliding).
 
 ## ISMIP-HOM verification
