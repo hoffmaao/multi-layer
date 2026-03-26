@@ -2,9 +2,6 @@
 
 A multilayer ice-flow model generalising the shallow shelf approximation, implemented in the dual form of [icepack2](https://github.com/icepack/icepack2).
 
-
-## What is this
-
 This package implements the multilayer model described in [Jouvet (2015)](https://doi.org/10.1017/jfm.2014.689).
 The idea is to split the ice column into a stack of thin layers, each with its own horizontal velocity.
 Adjacent layers are coupled through interlayer shear tractions.
@@ -17,9 +14,7 @@ The model uses the **dual formulation** from icepack2, where membrane stress and
 This formulation is well-posed at zero thickness, which enables natural handling of calving fronts and terminus evolution.
 
 
-## What have we done
-
-### Multilayer momentum balance
+## Multilayer momentum balance
 
 The core contribution is extending icepack2's dual-form SSA to multiple layers.
 Each layer has three fields: velocity, membrane stress, and interlayer stress.
@@ -34,7 +29,7 @@ The action functional is:
 
 Taking the Gateaux derivative of the total action recovers all the weak-form equations.
 
-### Composite rheology
+## Composite rheology
 
 Ice near the bed deforms primarily by dislocation creep ($n = 4$), while the colder upper ice deforms by grain boundary sliding ($n = 1.8$).
 The standard Glen's law with $n = 3$ is an effective average of these two mechanisms (Goldsby & Kohlstedt 2001, Behn et al. 2021, Ranganathan & Minchew 2024).
@@ -42,7 +37,7 @@ The standard Glen's law with $n = 3$ is an effective average of these two mechan
 The multilayer model naturally accommodates per-layer rheology.
 We can assign different stress exponents and rate factors to each layer, representing the transition from warm basal ice (large recrystallised grains, dislocation creep) to cold upper ice (smaller grains, grain boundary sliding).
 
-### ISMIP-HOM verification
+## ISMIP-HOM verification
 
 The model has been tested against the ISMIP-HOM benchmark experiments (Pattyn et al. 2008):
 
@@ -52,9 +47,7 @@ The model has been tested against the ISMIP-HOM benchmark experiments (Pattyn et
 Both uniform ($n = 3$) and composite ($n = 4$ / $n = 1.8$) rheologies have been verified across wavelengths from 10 to 160 km.
 
 
-## How to use it
-
-### Installation
+## Installation
 
 The package depends on [Firedrake](https://firedrakeproject.org/) and [icepack2](https://github.com/icepack/icepack2).
 With both installed:
@@ -65,7 +58,7 @@ cd multilayer
 pip install -e .
 ```
 
-### Tutorial
+## Tutorial
 
 The `notebooks/` directory contains a Jupyter notebook that walks through the model step by step:
 
@@ -73,7 +66,7 @@ The `notebooks/` directory contains a Jupyter notebook that walks through the mo
 2. Two-layer model with uniform Glen's law
 3. Two-layer composite rheology (dislocation creep + grain boundary sliding)
 
-### Running the ISMIP-HOM experiments
+## Running the ISMIP-HOM experiments
 
 From the `test/` directory:
 
