@@ -1,0 +1,15 @@
+[project]
+name = "multilayer"
+version = "0.0.1"
+authors = [
+    { name = "Andrew Hoffman", email = "hoffmaao@uw.edu" },
+]
+description = "Multilayer ice-flow model in dual form, generalising the shallow shelf approximation"
+license = { text = "GPL-3.0-or-later" }
+requires-python = ">=3.8"
+dependencies = [
+    "icepack2@file:///home/andrew/icepack2",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/hoffmaao/multilayer"
