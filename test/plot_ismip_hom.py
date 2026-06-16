@@ -109,7 +109,7 @@ def plot_experiment_b():
     colors = {1: "C0", 2: "C1", 3: "C2", 4: "C4", 5: "C5"}
 
     fig, axes = plt.subplots(1, len(wavelengths_km), figsize=(20, 4), sharey=False)
-    fig.suptitle("ISMIP-HOM B: surface $v_x$ (m/yr) — uniform n=3, L=1–5", fontsize=14)
+    fig.suptitle("ISMIP-HOM B: surface $v_x$ (m/yr), uniform n=3, L=1-5", fontsize=14)
 
     for ax, Lkm in zip(axes, wavelengths_km):
         Lx = Lkm * 1e3
@@ -149,7 +149,7 @@ def plot_experiment_d():
     colors = {1: "C0", 2: "C1", 3: "C2", 4: "C4", 5: "C5"}
 
     fig, axes = plt.subplots(2, len(wavelengths_km), figsize=(20, 7), sharey="row")
-    fig.suptitle("ISMIP-HOM D: $v_x$ (m/yr) — uniform n=3, L=1–5", fontsize=14)
+    fig.suptitle("ISMIP-HOM D: $v_x$ (m/yr), uniform n=3, L=1-5", fontsize=14)
 
     for col, Lkm in enumerate(wavelengths_km):
         Lx = Lkm * 1e3

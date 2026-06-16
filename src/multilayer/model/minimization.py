@@ -122,6 +122,68 @@ def momentum_balance(**kwargs):
     return F
 
 
+def schoof_friction_power(**kwargs):
+    r"""Friction power for the regularized Coulomb (Schoof/RCF) law.
+
+    This is the dual (minimization) form whose derivative with respect to
+    :math:`\tau` recovers the Schoof friction constitutive relation.
+
+    The RCF law :math:`|\tau| = \beta^2 (|u|/(|u|+u_0))^{1/m}` inverts to
+    :math:`|u| = u_0 (|\tau|/\beta^2)^m / (1 - (|\tau|/\beta^2)^m)`,
+    which has the same structure as Weertman with a stress-dependent
+    compliance :math:`K_{\rm eff} = u_0 / (\beta^{2m} - |\tau|^m)`.
+
+    The friction power is:
+
+    .. math::
+        P = \int u_0 \int_0^{|\tau|} \frac{t^m}{\beta^{2m} - t^m}\,dt\,dx
+
+    For :math:`m = 3`, the integral has a closed form involving logarithms
+    and arctangent.
+
+    Parameters
+    ----------
+    basal_stress : UFL split variable
+    friction_coefficient : Function
+        :math:`\beta^2` in MPa.
+    transition_speed : Constant
+        :math:`u_0` in m/yr.
+    sliding_exponent : Constant
+        m (= 3 for Glen's law).
+    """
+    τ = kwargs["basal_stress"]
+    β2 = kwargs["friction_coefficient"]
+    u_0 = kwargs["transition_speed"]
+    m = kwargs["sliding_exponent"]
+
+    τ_2 = inner(τ, τ)
+    τ_mag = ufl.sqrt(τ_2 + Constant(1e-20))
+
+    # r = |τ| / (β² + ε), smooth regularization (no conditional)
+    eps = Constant(1e-4)
+    r = τ_mag / (β2 + eps)
+
+    # For m=3: ∫₀^r s³/(1-s³) ds  (closed form)
+    # = -r + (1/6)ln((1+r+r²)/(1-r)²) + (1/√3)(atan((2r+1)/√3) - π/6)
+    # Regularize (1-r) → (1-r+δ) to keep ln finite near Coulomb limit
+    sqrt3 = Constant(1.7320508075688772)
+    pi_over_6 = Constant(0.5235987755982988)
+    delta = Constant(1e-6)
+    one_minus_r = Constant(1.0) - r + delta
+
+    log_term = (Constant(1.0) / Constant(6.0)) * ufl.ln(
+        (Constant(1.0) + r + r**2 + delta) / (one_minus_r**2)
+    )
+    atan_term = (Constant(1.0) / sqrt3) * (
+        ufl.atan2(Constant(2.0) * r + Constant(1.0), sqrt3)
+        - pi_over_6
+    )
+
+    integral = -r + log_term + atan_term
+
+    return u_0 * (β2 + eps) * integral * dx
+
+
 def calving_terminus(**kwargs):
     r"""Return the ocean back-pressure at the terminus for one layer"""
     u, h, s = map(kwargs.get, ("velocity", "thickness", "surface"))

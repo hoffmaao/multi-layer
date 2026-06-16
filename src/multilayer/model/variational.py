@@ -154,6 +154,50 @@ def momentum_balance(**kwargs):
     return F
 
 
+def schoof_friction(**kwargs):
+    r"""Regularized Coulomb friction (RCF, Joughin et al. 2019/2024).
+
+    .. math::
+        |\tau| = \beta^2 \left(\frac{|u|}{|u| + u_0}\right)^{1/m}
+
+    At low velocity (Weertman): :math:`|\tau| \sim \beta^2 (|u|/u_0)^{1/m}`
+
+    At high velocity (Coulomb): :math:`|\tau| \to \beta^2`
+
+    Structurally identical to Zoet & Iverson (2020) with
+    :math:`\beta^2 = C \cdot N`.  Sign convention matches icepack2:
+    :math:`\tau` opposes velocity.
+
+    Parameters
+    ----------
+    basal_stress : UFL split variable
+    velocity : UFL split variable
+    friction_coefficient : Function or Constant
+        :math:`\beta^2` in MPa. For explicit N dependence, pass
+        :math:`C \cdot N` where C is the Coulomb coefficient and N
+        is the effective pressure.
+    transition_speed : Constant
+        :math:`u_0` in m/yr. Default ~300.
+    sliding_exponent : Constant
+        m, typically Glen's n = 3.
+    """
+    τ = kwargs["basal_stress"]
+    u = kwargs["velocity"]
+    σ = get_test_function(τ)
+
+    β2 = kwargs["friction_coefficient"]
+    u_0 = kwargs["transition_speed"]
+    m = kwargs["sliding_exponent"]
+
+    # Primal RCF (Joughin et al. 2024, Eq. 7)
+    eps = Constant(1e-4)  # ~0.01 m/yr speed floor (prevents NaN on fine meshes)
+    u_mag = ufl.sqrt(inner(u, u) + eps)
+    ratio = u_mag / (u_mag + u_0)
+    τ_mag = β2 * ratio ** (Constant(1.0) / m)
+
+    return inner(τ + τ_mag * u / u_mag, σ) * dx
+
+
 def calving_terminus(**kwargs):
     r"""Return the ocean back-pressure at the terminus for one layer
 

@@ -47,8 +47,8 @@ The package depends on [Firedrake](https://firedrakeproject.org/) and [icepack2]
 With both installed:
 
 ```
-git clone https://github.com/hoffmaao/multilayer.git
-cd multilayer
+git clone https://github.com/hoffmaao/multi-layer.git
+cd multi-layer
 pip install -e .
 ```
 
@@ -73,9 +73,34 @@ python plot_composite.py       # Composite vs uniform comparison
 python plot_schematic.py       # 3D schematic figure
 ```
 
+## Running the MISMIP+ experiment
+
+The package also includes the MISMIP+ marine-ice-sheet benchmark geometry
+(Asay-Davis et al. 2016) with a composite, depth-varying rheology: a soft
+temperate base (15% of the column, $n = 4$, $A = 46$ MPa$^{-4}$ yr$^{-1}$;
+Goldsby & Kohlstedt 2001) beneath a colder grain-boundary-sliding layer
+($n = 1.8$, $A = 0.24$ MPa$^{-1.8}$ yr$^{-1}$, obtained from the Cuffey &
+Paterson 2010 $n = 3$ rate factor at $-20$ °C stress-matched to $n = 1.8$).
+Grounded ice slides by a regularised-Coulomb (Schoof) law whose drag vanishes
+at the grounding line, and the terminus carries the ocean back-pressure.
+
+```python
+python mismip_plus.py          # diagnostic two-layer velocity solve
+python mismip_plus_spinup.py   # prognostic spin-up + Ice1r melt response
+```
+
+`mismip_plus.py` solves the two-layer momentum balance on a prescribed
+geometry, warm-started from a depth-averaged ($n = 3$) solve.
+`mismip_plus_spinup.py` evolves the thickness with the depth-integrated
+continuity equation (icepack2's mass balance driven by the depth-averaged
+velocity), spins up to a steady grounding line, and then applies the MISMIP+
+Ice1r sub-shelf melt parameterisation to drive grounding-line retreat.
+
 
 ## References
 
+- Asay-Davis, W. K. et al. (2016). Experimental design for three interrelated marine ice sheet and ocean model intercomparison projects: MISMIP v.3 (MISMIP+), ISOMIP v.2 (ISOMIP+) and MISOMIP v.1 (MISOMIP1). *Geosci. Model Dev.*, 9, 2471-2497. doi:[10.5194/gmd-9-2471-2016](https://doi.org/10.5194/gmd-9-2471-2016)
+- Cuffey, K. M. & Paterson, W. S. B. (2010). *The Physics of Glaciers* (4th ed.). Butterworth-Heinemann.
 - Jouvet, G. (2015). A multilayer ice-flow model generalising the shallow shelf approximation. *J. Fluid Mech.*, 764, 26-51. doi:[10.1017/jfm.2014.689](https://doi.org/10.1017/jfm.2014.689)
 - Pattyn, F. et al. (2008). Benchmark experiments for higher-order and full-Stokes ice sheet models (ISMIP-HOM). *The Cryosphere*, 2, 95-108. doi:[10.5194/tc-2-95-2008](https://doi.org/10.5194/tc-2-95-2008)
 - Goldsby, D. L. & Kohlstedt, D. L. (2001). Superplastic deformation of ice. *J. Geophys. Res.*, 106, 11017-11030.
