@@ -77,6 +77,97 @@ def basal_stress_power(**kwargs):
     return h * A / (n + 1) * τ_n * dx
 
 
+def composite_viscous_power(**kwargs):
+    r"""Composite (dislocation + linear) membrane viscous power.
+
+    A composite flow law adds the strain rates of a nonlinear creep mechanism
+    and a linear (:math:`n=1`) one; in the dual form their complementary
+    energies add.  Following icepack2's ``dome_test`` and the ismip7 /
+    peninsula composite rheology, the linear term is a small regulariser
+    evaluated at a *constant* reference thickness :math:`H_{\rm ref}`:
+
+    .. math::
+        P = \underbrace{2 h\,\frac{A}{n+1}\,|M_{\rm dev}|^{n+1}}_{\text{creep, exponent }n}
+          + \alpha\,\underbrace{2 H_{\rm ref}\,\frac{A_{\rm lin}}{2}\,|M_{\rm dev}|^{2}}_{\text{linear regulariser}}
+
+    with :math:`A_{\rm lin} = A\,\tau_c^{\,n-1}`, so the two mechanisms agree at
+    :math:`|M_{\rm dev}| = \tau_c`.  The :math:`n=1` term is positive-definite
+    in :math:`M` for any :math:`A>0`, so it keeps the membrane-stress block of
+    the Jacobian non-singular where the pure-creep Hessian vanishes: at zero
+    stress (the first Newton step of an :math:`n>1` solve) and -- because it
+    uses :math:`H_{\rm ref}` rather than :math:`h` -- where the ice thins to
+    zero (calving fronts, nunataks).
+
+    Parameters
+    ----------
+    membrane_stress, thickness, flow_law_coefficient, flow_law_exponent
+        As in :func:`viscous_power`.
+    regularization : Constant, optional
+        :math:`\alpha`, weight of the linear term (default ``1e-4``).
+    reference_thickness : Constant, optional
+        :math:`H_{\rm ref}` for the linear term (default ``100`` m).
+    reference_stress : Constant, optional
+        :math:`\tau_c`, the mechanism cross-over stress (default ``0.1`` MPa).
+    """
+    M = kwargs["membrane_stress"]
+    h = kwargs["thickness"]
+    A, n = map(kwargs.get, ("flow_law_coefficient", "flow_law_exponent"))
+    α = kwargs.get("regularization", Constant(1e-4))
+    H_ref = kwargs.get("reference_thickness", Constant(100.0))
+    τ_c = kwargs.get("reference_stress", Constant(0.1))
+
+    A_lin = A * τ_c ** (n - Constant(1.0))
+    return (
+        viscous_power(
+            membrane_stress=M, thickness=h,
+            flow_law_coefficient=A, flow_law_exponent=n,
+        )
+        + α * viscous_power(
+            membrane_stress=M, thickness=H_ref,
+            flow_law_coefficient=A_lin, flow_law_exponent=Constant(1.0),
+        )
+    )
+
+
+def composite_interlayer_power(**kwargs):
+    r"""Composite interlayer shear power (dislocation + linear regulariser).
+
+    The :func:`interlayer_power` analogue of :func:`composite_viscous_power`.
+    The interlayer (vertical-shear) Hessian also scales like :math:`|S|^{n-1}`
+    and vanishes at :math:`S=0`, which makes the two-layer dual system singular
+    on the first Newton step when the stresses are initialised to zero.  The
+    linear (:math:`n=1`) term restores a positive-definite block.
+
+    Parameters
+    ----------
+    interlayer_stress, thickness_above, thickness_below, flow_law_coefficient,
+    flow_law_exponent
+        As in :func:`interlayer_power`.
+    regularization : Constant, optional
+        :math:`\alpha` (default ``1e-4``).
+    reference_stress : Constant, optional
+        :math:`\tau_c` (default ``0.1`` MPa).
+    """
+    S = kwargs["interlayer_stress"]
+    h_above = kwargs["thickness_above"]
+    h_below = kwargs["thickness_below"]
+    A, n = map(kwargs.get, ("flow_law_coefficient", "flow_law_exponent"))
+    α = kwargs.get("regularization", Constant(1e-4))
+    τ_c = kwargs.get("reference_stress", Constant(0.1))
+
+    A_lin = A * τ_c ** (n - Constant(1.0))
+    return (
+        interlayer_power(
+            interlayer_stress=S, thickness_above=h_above, thickness_below=h_below,
+            flow_law_coefficient=A, flow_law_exponent=n,
+        )
+        + α * interlayer_power(
+            interlayer_stress=S, thickness_above=h_above, thickness_below=h_below,
+            flow_law_coefficient=A_lin, flow_law_exponent=Constant(1.0),
+        )
+    )
+
+
 def momentum_balance(**kwargs):
     r"""Return the per-layer momentum balance constraint
 
@@ -125,63 +216,56 @@ def momentum_balance(**kwargs):
 def schoof_friction_power(**kwargs):
     r"""Friction power for the regularized Coulomb (Schoof/RCF) law.
 
-    This is the dual (minimization) form whose derivative with respect to
-    :math:`\tau` recovers the Schoof friction constitutive relation.
-
-    The RCF law :math:`|\tau| = \beta^2 (|u|/(|u|+u_0))^{1/m}` inverts to
-    :math:`|u| = u_0 (|\tau|/\beta^2)^m / (1 - (|\tau|/\beta^2)^m)`,
-    which has the same structure as Weertman with a stress-dependent
-    compliance :math:`K_{\rm eff} = u_0 / (\beta^{2m} - |\tau|^m)`.
-
-    The friction power is:
+    Dual (minimization) form whose derivative with respect to :math:`\tau`
+    recovers a regularized-Coulomb sliding relation that is valid for *any*
+    sliding exponent :math:`m` (the earlier implementation was hard-wired to
+    :math:`m = 3`).  With :math:`r = |\tau| / \beta^2` the constitutive law is
 
     .. math::
-        P = \int u_0 \int_0^{|\tau|} \frac{t^m}{\beta^{2m} - t^m}\,dt\,dx
+        |u| = u_0\,\frac{r^{m}}{1 - r^{\,m+1}},
 
-    For :math:`m = 3`, the integral has a closed form involving logarithms
-    and arctangent.
+    a Weertman power law :math:`|u|\approx u_0\,r^{m}` at low driving stress
+    that diverges as :math:`|\tau|\to\beta^2` -- the Coulomb yield limit.  Its
+    complementary energy is elementary for every :math:`m`,
+
+    .. math::
+        P = \int \frac{u_0\,\beta^2}{m+1}\,\bigl[-\ln\!\bigl(1 - r^{\,m+1}\bigr)\bigr]\,dx,
+
+    which mirrors the Weertman :func:`friction_power`
+    :math:`\tfrac{K}{m+1}|\tau|^{m+1}` (its small-stress limit, with
+    :math:`K = u_0/\beta^{2m}`) and reduces drag to zero at the grounding line
+    as :math:`\beta^2 = C N \to 0`.
+
+    Because the basal-stress Hessian scales like :math:`|\tau|^{m-1}`, it is
+    *constant and non-zero at* :math:`\tau = 0` only when :math:`m = 1`.  Ramping
+    the sliding exponent :math:`m: 1 \to m` alongside the flow-law exponent
+    therefore keeps the dual system non-singular through a continuation -- the
+    same trick icepack2's own tests use for Weertman drag.
 
     Parameters
     ----------
     basal_stress : UFL split variable
     friction_coefficient : Function
-        :math:`\beta^2` in MPa.
+        :math:`\beta^2 = C N` in MPa (vanishes on floating ice).
     transition_speed : Constant
         :math:`u_0` in m/yr.
     sliding_exponent : Constant
-        m (= 3 for Glen's law).
+        m (= 3 for Glen's law); may be a continuation parameter.
     """
     τ = kwargs["basal_stress"]
     β2 = kwargs["friction_coefficient"]
     u_0 = kwargs["transition_speed"]
     m = kwargs["sliding_exponent"]
 
-    τ_2 = inner(τ, τ)
-    τ_mag = ufl.sqrt(τ_2 + Constant(1e-20))
+    eps = Constant(1e-4)    # keep r finite where β² = C N → 0 (floating ice)
+    delta = Constant(1e-6)  # keep the log finite at the Coulomb limit r → 1
 
-    # r = |τ| / (β² + ε), smooth regularization (no conditional)
-    eps = Constant(1e-4)
-    r = τ_mag / (β2 + eps)
+    # r^(m+1) built from |τ|², mirroring the Weertman friction_power idiom.
+    β2e = β2 + eps
+    r_2 = (inner(τ, τ) + Constant(1e-20)) / (β2e * β2e)         # = r²
+    r_mp1 = conditional(eq(m, 1), r_2, r_2 ** ((m + 1) / 2))    # = r^(m+1)
 
-    # For m=3: ∫₀^r s³/(1-s³) ds  (closed form)
-    # = -r + (1/6)ln((1+r+r²)/(1-r)²) + (1/√3)(atan((2r+1)/√3) - π/6)
-    # Regularize (1-r) → (1-r+δ) to keep ln finite near Coulomb limit
-    sqrt3 = Constant(1.7320508075688772)
-    pi_over_6 = Constant(0.5235987755982988)
-    delta = Constant(1e-6)
-    one_minus_r = Constant(1.0) - r + delta
-
-    log_term = (Constant(1.0) / Constant(6.0)) * ufl.ln(
-        (Constant(1.0) + r + r**2 + delta) / (one_minus_r**2)
-    )
-    atan_term = (Constant(1.0) / sqrt3) * (
-        ufl.atan2(Constant(2.0) * r + Constant(1.0), sqrt3)
-        - pi_over_6
-    )
-
-    integral = -r + log_term + atan_term
-
-    return u_0 * (β2 + eps) * integral * dx
+    return u_0 * β2e / (m + 1) * (-ufl.ln(Constant(1.0) - r_mp1 + delta)) * dx
 
 
 def calving_terminus(**kwargs):
