@@ -25,7 +25,6 @@ from firedrake import (
     conditional,
     Constant,
     inner,
-    tr,
     sym,
     grad,
     dx,
@@ -35,6 +34,7 @@ from firedrake import (
     jump,
     FacetNormal,
     min_value,
+    max_value,
 )
 from icepack2.constants import ice_density as ρ_I, water_density as ρ_W, gravity as g
 
@@ -265,7 +265,10 @@ def schoof_friction_power(**kwargs):
     r_2 = (inner(τ, τ) + Constant(1e-20)) / (β2e * β2e)         # = r²
     r_mp1 = conditional(eq(m, 1), r_2, r_2 ** ((m + 1) / 2))    # = r^(m+1)
 
-    return u_0 * β2e / (m + 1) * (-ufl.ln(Constant(1.0) - r_mp1 + delta)) * dx
+    # Clamp the log argument: a Newton iterate can overshoot the Coulomb
+    # limit (r > 1), where 1 - r^(m+1) is negative and ln would be NaN.
+    log_arg = max_value(Constant(1.0) - r_mp1, delta)
+    return u_0 * β2e / (m + 1) * (-ufl.ln(log_arg)) * dx
 
 
 def calving_terminus(**kwargs):

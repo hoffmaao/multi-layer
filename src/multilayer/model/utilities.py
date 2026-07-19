@@ -91,7 +91,7 @@ def effective_pressure(thickness, surface, bed, Q):
     thickness : Function
         Ice thickness H.
     surface : Function
-        Ice surface elevation s.
+        Ice surface elevation s (unused; kept for call-site compatibility).
     bed : Function
         Bed elevation b.
     Q : FunctionSpace
@@ -105,9 +105,9 @@ def effective_pressure(thickness, surface, bed, Q):
     from icepack2.constants import ice_density as ρ_I, water_density as ρ_W, gravity as g
     from firedrake import Function, Constant, max_value
 
-    # Height above flotation
-    h_f = max_value(Constant(0.0), -bed * Constant(ρ_W / ρ_I))
-    haf = surface - h_f
+    # Thickness above flotation
+    h_f = max_value(Constant(0.0), -bed) * Constant(ρ_W / ρ_I)
+    haf = thickness - h_f
 
     N = Function(Q, name="effective_pressure")
     N.interpolate(max_value(ρ_I * g * haf, Constant(0.0)))
@@ -147,6 +147,7 @@ def grounding_line_weakening(thickness, surface, bed, Q, h_T=41.0):
     Parameters
     ----------
     thickness, surface, bed : Function
+        ``surface`` is unused; kept for call-site compatibility.
     Q : FunctionSpace
     h_T : float
         Weakening threshold in meters above flotation.
@@ -160,8 +161,8 @@ def grounding_line_weakening(thickness, surface, bed, Q, h_T=41.0):
     from icepack2.constants import water_density as ρ_W, ice_density as ρ_I
     from firedrake import Function, Constant, max_value, min_value
 
-    h_f = max_value(Constant(0.0), -bed * Constant(ρ_W / ρ_I))
-    haf = max_value(surface - h_f, Constant(0.0))
+    h_f = max_value(Constant(0.0), -bed) * Constant(ρ_W / ρ_I)
+    haf = max_value(thickness - h_f, Constant(0.0))
 
     lam = Function(Q, name="gl_weakening")
     lam.interpolate(min_value(haf / Constant(h_T), Constant(1.0)))
