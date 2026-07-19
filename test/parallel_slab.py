@@ -133,8 +133,12 @@ def solve_parallel_slab(num_layers, nx=16):
         h_l = h_layers[l]
         fl = fields[l]
 
-        # Viscous power per layer
-        Lagrangian += minimization.viscous_power(
+        # Viscous power per layer.  The composite form matters here: the
+        # exact slab solution has M = 0, where the pure-creep dual Hessian
+        # |M|^{n-1} vanishes and the Jacobian is singular for n > 1.  The
+        # linear regulariser keeps the M block invertible without
+        # perturbing the M = 0 solution.
+        Lagrangian += minimization.composite_viscous_power(
             membrane_stress=fl["membrane_stress"],
             thickness=h_l,
             **rheology,
@@ -172,15 +176,14 @@ def solve_parallel_slab(num_layers, nx=16):
     # Take derivative to get the residual
     F = derivative(Lagrangian, z)
 
-    # Boundary conditions: no Dirichlet BCs needed for the parallel slab.
-    # The solution is uniform in x and y; the driving stress comes from
-    # grad(s) and is balanced by interlayer/basal shear.
-    # We pin one velocity node to remove the translational nullspace
-    # from the membrane stress equation.
-    bcs = [firedrake.DirichletBC(Z.sub(3 * l), 0, "on_boundary") for l in range(L)]
-
+    # Boundary conditions: none.  The solution is uniform in x and y; the
+    # driving stress comes from grad(s) and is balanced by interlayer and
+    # basal shear.  There is no velocity nullspace -- the basal and
+    # interlayer stress laws pin the absolute velocities -- and Dirichlet
+    # conditions would introduce membrane boundary layers that bias the
+    # interior away from the analytical solution.
     params = {"form_compiler_parameters": {"quadrature_degree": 8}}
-    problem = NonlinearVariationalProblem(F, z, bcs, **params)
+    problem = NonlinearVariationalProblem(F, z, None, **params)
     solver = NonlinearVariationalSolver(
         problem,
         solver_parameters={
@@ -190,6 +193,9 @@ def solve_parallel_slab(num_layers, nx=16):
             "ksp_type": "gmres",
             "pc_type": "lu",
             "pc_factor_mat_solver_type": "mumps",
+            # MUMPS underestimates the fill-in for this saddle-point
+            # system and aborts with FACTOR_OUTMEMORY at default settings.
+            "mat_mumps_icntl_14": 200,
         },
     )
 
@@ -232,8 +238,12 @@ def main():
         u_computed = solve_parallel_slab(L, nx=8)
         u_s_exact = u_exact[-1]
         u_s_comp = u_computed[-1]
-        rel_err = abs(u_s_comp - u_s_exact) / abs(u_s_exact) if u_s_exact != 0 else 0
+        rel_err = np.max(np.abs(u_computed - u_exact) / np.abs(u_exact))
         print(f"{L:4d}  {u_s_comp:20.4f}  {u_s_exact:22.4f}  {rel_err:14.2e}")
+        assert rel_err < 1e-6, (
+            f"L={L}: computed layer velocities differ from analytical "
+            f"solution by {rel_err:.2e} (tolerance 1e-6)"
+        )
 
     print()
     print(f"SIA limit (L -> inf): {u_sia:.4f} m/yr")

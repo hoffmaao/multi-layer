@@ -28,7 +28,6 @@ from firedrake import (
     conditional,
     Constant,
     inner,
-    tr,
     sym,
     grad,
     dx,
