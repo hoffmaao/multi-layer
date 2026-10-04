@@ -31,6 +31,45 @@ The standard Glen's law with $n = 3$ is an effective average of these two mechan
 The multilayer model naturally accommodates rheologies that change as a function of depth.
 We can assign different stress exponents and rate factors to each layer, representing the transition from warm basal ice (large recrystallised grains, dislocation creep) to cold upper ice (smaller grains, grain boundary sliding).
 
+## Layers that vanish
+
+A layer whose thickness is zero somewhere -- a temperate basal layer that
+pinches out up-glacier, say -- should leave no trace there: the model with
+it must be the model without it.  Two choices in the discretisation decide
+whether it does, and both are options of this package.
+
+**Series interfaces.** By convention an interface is closed with the law
+of the layer below it, so an empty basal layer's rheology still governs
+the shear above it.  Given the law of the layer above as well,
+`interlayer_stress_law` (and `interlayer_power` in the primal form) puts
+the two half-layers in series: the shear stress is continuous across the
+interface and each half-layer shears under its own law, so the closure's
+compliance is the thickness-weighted mean of the two.  Two layers of one
+law give exactly the single-law form; a layer of zero thickness has
+weight zero.
+
+**Nodal stresses.** The basal and interlayer stresses live one value per
+cell by default, closed on the cell means of the velocities, while the
+momentum balances that tie them are tested with vertex functions.  An
+empty layer's balance then equates its two interface stresses only in
+projection, and the sliding velocity under an empty bottom layer is
+determined only through cell means and comes out rough.
+`create_function_space(stress_family="CG")` puts those stresses at the
+vertices with the velocities, and every term they appear in -- the
+closures and the stress terms of the momentum balance -- is taken in the
+vertex measure (`vertex_measure`), so it is still the derivative of one
+action.  Stress continuity through an empty layer then holds node by
+node, an empty middle layer drops out exactly, and the sliding velocity
+is determined node by node.  The membrane stress stays cellwise.
+
+`test/series_interface_test.py` checks the algebra: the series closure
+with one law is the single-law form; with either side empty it is the
+other law's form; the series power is the potential of the series
+closure; a nodal closure is collocation.  The solved equivalences -- an
+empty top layer is the one-layer model, an empty middle layer is the
+two-layer model, a thinning layer converges to the empty one -- are in
+`icepack_tools`, which solves with these closures.
+
 ## ISMIP-HOM verification
 
 The model has been tested against the ISMIP-HOM benchmark experiments (Pattyn et al. 2008):
@@ -71,6 +110,7 @@ python ismip_hom_b_composite.py  # Experiment B, composite n=4/1.8
 python plot_ismip_hom.py       # Comparison with intercomparison data
 python plot_composite.py       # Composite vs uniform comparison
 python plot_schematic.py       # 3D schematic figure
+python series_interface_test.py  # series interfaces and nodal stresses, assembled
 ```
 
 ## Running the MISMIP+ experiment

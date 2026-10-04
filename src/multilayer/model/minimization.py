@@ -43,6 +43,13 @@ from icepack2.model.minimization import viscous_power  # noqa: F401
 from icepack2.model.minimization import friction_power  # noqa: F401
 
 
+def _shear_power(S_2, h, A, n):
+    r"""One half-layer's share of the shear dissipation,
+    :math:`h\,\frac{A}{n+1}|S|^{n+1}`."""
+    S_n = conditional(eq(n, 1), S_2, S_2 ** ((n + 1) / 2))
+    return h * A / (n + 1) * S_n
+
+
 def interlayer_power(**kwargs):
     r"""Return the interlayer shear dissipation potential
 
@@ -51,15 +58,37 @@ def interlayer_power(**kwargs):
 
     The factor :math:`h^{l+1} + h^l` arises from the normalisation of the
     velocity jump in the interlayer constitutive law.
+
+    With the law of the layer above given too (``flow_law_coefficient_above``,
+    ``flow_law_exponent_above``) the two half-layers are in series and each
+    dissipates under its own law,
+
+    .. math::
+        \int \left(h^l\,\frac{A_l}{n_l+1}\,|S^l|^{n_l+1}
+        + h^{l+1}\,\frac{A_{l+1}}{n_{l+1}+1}\,|S^l|^{n_{l+1}+1}\right) dx
+
+    whose derivative is the series closure of
+    :func:`multilayer.model.variational.interlayer_stress_law`.  ``measure``
+    is the integral it is taken in (``dx``; the vertex measure for nodal
+    stresses, together with the coupling term of the momentum balance).
     """
     S = kwargs["interlayer_stress"]
     h_above = kwargs["thickness_above"]
     h_below = kwargs["thickness_below"]
     A, n = map(kwargs.get, ("flow_law_coefficient", "flow_law_exponent"))
+    A_above, n_above = map(kwargs.get, ("flow_law_coefficient_above",
+                                        "flow_law_exponent_above"))
+    measure = kwargs.get("measure", dx)
 
     S_2 = inner(S, S)
-    S_n = conditional(eq(n, 1), S_2, S_2 ** ((n + 1) / 2))
-    return (h_above + h_below) * A / (n + 1) * S_n * dx
+    if A_above is None:
+        S_n = conditional(eq(n, 1), S_2, S_2 ** ((n + 1) / 2))
+        return (h_above + h_below) * A / (n + 1) * S_n * measure
+    if n_above is None:
+        raise ValueError("a series interface needs flow_law_exponent_above "
+                         "with flow_law_coefficient_above")
+    return (_shear_power(S_2, h_below, A, n)
+            + _shear_power(S_2, h_above, A_above, n_above)) * measure
 
 
 def basal_stress_power(**kwargs):
@@ -71,10 +100,11 @@ def basal_stress_power(**kwargs):
     τ = kwargs["basal_stress"]
     h = kwargs["thickness"]
     A, n = map(kwargs.get, ("flow_law_coefficient", "flow_law_exponent"))
+    measure = kwargs.get("measure", dx)
 
     τ_2 = inner(τ, τ)
     τ_n = conditional(eq(n, 1), τ_2, τ_2 ** ((n + 1) / 2))
-    return h * A / (n + 1) * τ_n * dx
+    return h * A / (n + 1) * τ_n * measure
 
 
 def composite_viscous_power(**kwargs):
@@ -152,18 +182,31 @@ def composite_interlayer_power(**kwargs):
     h_above = kwargs["thickness_above"]
     h_below = kwargs["thickness_below"]
     A, n = map(kwargs.get, ("flow_law_coefficient", "flow_law_exponent"))
+    A_above, n_above = map(kwargs.get, ("flow_law_coefficient_above",
+                                        "flow_law_exponent_above"))
     α = kwargs.get("regularization", Constant(1e-4))
     τ_c = kwargs.get("reference_stress", Constant(0.1))
+    measure = kwargs.get("measure", dx)
 
     A_lin = A * τ_c ** (n - Constant(1.0))
+    series, series_lin = {}, {}
+    if A_above is not None:
+        if n_above is None:
+            raise ValueError("a series interface needs flow_law_exponent_above "
+                             "with flow_law_coefficient_above")
+        series = dict(flow_law_coefficient_above=A_above,
+                      flow_law_exponent_above=n_above)
+        series_lin = dict(flow_law_coefficient_above=A_above * τ_c ** (n_above - Constant(1.0)),
+                          flow_law_exponent_above=Constant(1.0))
     return (
         interlayer_power(
             interlayer_stress=S, thickness_above=h_above, thickness_below=h_below,
-            flow_law_coefficient=A, flow_law_exponent=n,
+            flow_law_coefficient=A, flow_law_exponent=n, measure=measure, **series,
         )
         + α * interlayer_power(
             interlayer_stress=S, thickness_above=h_above, thickness_below=h_below,
             flow_law_coefficient=A_lin, flow_law_exponent=Constant(1.0),
+            measure=measure, **series_lin,
         )
     )
 
@@ -185,30 +228,39 @@ def momentum_balance(**kwargs):
     basal_stress : icepack2-convention basal drag (bottom layer only)
     stress_above : interlayer stress from the layer above, or ``None``
     stress_below : interlayer stress from the layer below, or ``None``
+    membrane_thickness, stress_measure, ice_density, gravity : optional
+        As in :func:`multilayer.model.variational.momentum_balance`; the
+        stress measure must match the one the shear powers are taken in.
     """
     u = kwargs["velocity"]
     M = kwargs["membrane_stress"]
     h = kwargs["thickness"]
+    h_m = kwargs.get("membrane_thickness")
+    if h_m is None:
+        h_m = h
     s = kwargs["surface"]
+    ρ = kwargs.get("ice_density", ρ_I)
+    g_ = kwargs.get("gravity", g)
+    dxs = kwargs.get("stress_measure", dx)
 
     τ = kwargs.get("basal_stress")
     S_above = kwargs.get("stress_above")
     S_below = kwargs.get("stress_below")
 
     ε = sym(grad(u))
-    F = (-h * inner(M, ε) - ρ_I * g * h * inner(grad(s), u)) * dx
+    F = (-h_m * inner(M, ε) - ρ * g_ * h * inner(grad(s), u)) * dx
 
     if τ is not None:
-        F += inner(τ, u) * dx
+        F += inner(τ, u) * dxs
 
     if S_above is not None:
-        F += inner(S_above, u) * dx
+        F += inner(S_above, u) * dxs
     if S_below is not None:
-        F -= inner(S_below, u) * dx
+        F -= inner(S_below, u) * dxs
 
     mesh = ufl.domain.extract_unique_domain(u)
     ν = FacetNormal(mesh)
-    F += ρ_I * g * avg(h) * inner(jump(s, ν), avg(u)) * dS
+    F += ρ * g_ * avg(h) * inner(jump(s, ν), avg(u)) * dS
 
     return F
 

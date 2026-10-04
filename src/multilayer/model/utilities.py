@@ -17,7 +17,12 @@ import firedrake
 from icepack2.model.utilities import get_test_function  # noqa: F401
 
 
-def create_function_space(mesh, num_layers, degree=1):
+#: Where the basal and interlayer stresses may live.
+STRESS_FAMILIES = ("DG", "CG")
+
+
+def create_function_space(mesh, num_layers, degree=1, cell=None,
+                          stress_family="DG"):
     r"""Create the mixed function space for the multilayer model
 
     For *L* layers the space has 3L subspaces ordered as
@@ -27,26 +32,90 @@ def create_function_space(mesh, num_layers, degree=1):
 
     where :math:`u^l` is the velocity (CG vector), :math:`M^l` is the
     membrane stress (DG symmetric tensor), and :math:`S^l` is the
-    interlayer or basal stress (DG vector).
+    interlayer or basal stress (a DG vector by default).
 
     Parameters
     ----------
     mesh : firedrake.Mesh
     num_layers : int
     degree : int, optional
-        Polynomial degree for velocity (CG). Stresses use degree - 1 (DG).
+        Polynomial degree for velocity (CG). The membrane stress, and the
+        basal and interlayer stresses unless ``stress_family="CG"``, use
+        degree - 1 (DG).
+    cell : ufl.Cell, optional
+        The cell to build the elements on, ``mesh.ufl_cell()`` by default;
+        passing it through unchanged keeps extruded meshes working.
+    stress_family : {"DG", "CG"}
+        Where the basal and interlayer stresses live.  ``"DG"`` (the
+        default) is one value per cell, closed on the cell means of the
+        velocities.  ``"CG"`` puts them at the vertices with the
+        velocities, degree 1 (so ``degree`` must be 1), for closures
+        collocated there with :func:`vertex_measure`: **nodal stresses**.  With them an empty
+        layer's momentum balance equates its two interface stresses node
+        by node rather than in projection, so a layer of zero thickness
+        drops out of the solution exactly, and the sliding velocity under
+        an empty bottom layer is determined node by node.  The membrane
+        stress stays cellwise either way.
     """
-    cg = firedrake.FiniteElement("CG", "triangle", degree)
-    dg = firedrake.FiniteElement("DG", "triangle", degree - 1)
+    if stress_family not in STRESS_FAMILIES:
+        raise ValueError(f"stress_family must be one of {STRESS_FAMILIES}, "
+                         f"got {stress_family!r}")
+    if stress_family == "CG" and degree != 1:
+        raise ValueError("nodal stresses need degree 1: they are closed with "
+                         "vertex quadrature, under which higher-degree basis "
+                         "functions vanish at every quadrature point")
+    if cell is None:
+        cell = mesh.ufl_cell()
+    cg = firedrake.FiniteElement("CG", cell, degree)
+    dg = firedrake.FiniteElement("DG", cell, degree - 1)
     V = firedrake.VectorFunctionSpace(mesh, cg)
     Σ = firedrake.TensorFunctionSpace(mesh, dg, symmetry=True)
-    T = firedrake.VectorFunctionSpace(mesh, dg)
+    T = firedrake.VectorFunctionSpace(mesh, cg if stress_family == "CG" else dg)
 
     spaces = []
     for l in range(num_layers):
         spaces.extend([V, Σ, T])
 
     return firedrake.MixedFunctionSpace(spaces)
+
+
+def stress_family(space):
+    r"""The element family of a (vector) stress space: ``"Lagrange"`` for
+    nodal stresses, ``"Discontinuous Lagrange"`` for cellwise ones."""
+    elem = space.ufl_element()
+    fam = elem.family()
+    if fam == "Mixed":                     # a vector element that hides its scalar
+        sub = elem.sub_elements
+        fam = (sub() if callable(sub) else sub)[0].family()
+    return fam
+
+
+def is_nodal(space):
+    r"""Does this stress space put its values at the vertices?"""
+    return stress_family(space) in ("Lagrange", "Q")
+
+
+def vertex_measure(mesh):
+    r"""``dx`` with vertex quadrature on triangles.
+
+    A term integrated with it against a continuous test function is
+    collocated at the vertices (the lumped mass), so a closure taken in it
+    holds node by node: :math:`\tau_i = -\tau_b(u_i)`,
+    :math:`c(S_i)\,S_i = (u^{l}_i - u^{l-1}_i)/h_i`.  Nodal stresses
+    (:func:`create_function_space` with ``stress_family="CG"``) take every
+    basal and interlayer stress term in this measure -- the closures and
+    the stress terms of the momentum balance alike -- so the whole thing
+    is still the derivative of one action.
+    """
+    from finat.point_set import PointSet
+    from finat.quadrature import QuadratureRule
+    name = mesh.ufl_cell().cellname
+    if (name() if callable(name) else name) != "triangle":
+        raise NotImplementedError(
+            "nodal stresses: the vertex quadrature rule is set up for triangles")
+    rule = QuadratureRule(PointSet([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]),
+                          [1.0 / 6.0] * 3)
+    return firedrake.dx(scheme=rule)
 
 
 def split_fields(z, num_layers):
