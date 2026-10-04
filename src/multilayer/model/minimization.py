@@ -191,6 +191,9 @@ def composite_interlayer_power(**kwargs):
     A_lin = A * τ_c ** (n - Constant(1.0))
     series, series_lin = {}, {}
     if A_above is not None:
+        if n_above is None:
+            raise ValueError("a series interface needs flow_law_exponent_above "
+                             "with flow_law_coefficient_above")
         series = dict(flow_law_coefficient_above=A_above,
                       flow_law_exponent_above=n_above)
         series_lin = dict(flow_law_coefficient_above=A_above * τ_c ** (n_above - Constant(1.0)),

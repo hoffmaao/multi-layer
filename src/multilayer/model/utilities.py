@@ -47,8 +47,8 @@ def create_function_space(mesh, num_layers, degree=1, cell=None,
         Where the basal and interlayer stresses live.  ``"DG"`` (the
         default) is one value per cell, closed on the cell means of the
         velocities.  ``"CG"`` puts them at the vertices with the
-        velocities, degree ``degree``, for closures collocated there with
-        :func:`vertex_measure`: **nodal stresses**.  With them an empty
+        velocities, degree 1 (so ``degree`` must be 1), for closures
+        collocated there with :func:`vertex_measure`: **nodal stresses**.  With them an empty
         layer's momentum balance equates its two interface stresses node
         by node rather than in projection, so a layer of zero thickness
         drops out of the solution exactly, and the sliding velocity under
@@ -58,6 +58,10 @@ def create_function_space(mesh, num_layers, degree=1, cell=None,
     if stress_family not in STRESS_FAMILIES:
         raise ValueError(f"stress_family must be one of {STRESS_FAMILIES}, "
                          f"got {stress_family!r}")
+    if stress_family == "CG" and degree != 1:
+        raise ValueError("nodal stresses need degree 1: they are closed with "
+                         "vertex quadrature, under which higher-degree basis "
+                         "functions vanish at every quadrature point")
     if cell is None:
         cell = mesh.ufl_cell()
     cg = firedrake.FiniteElement("CG", cell, degree)

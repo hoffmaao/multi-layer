@@ -69,7 +69,7 @@ def state(stress_family="DG", seed=0):
     return mesh, Q, H, Z, z
 
 
-def closure(z, H, f_below, law_below, law_above=None, measure=dx):
+def closure(z, H, f_below, law_below, law_above=None, measure=dx, **extra):
     """The assembled interlayer closure (block S1) for a basal layer of
     ``f_below * H``."""
     f = split_fields(split(z), 2)
@@ -78,7 +78,7 @@ def closure(z, H, f_below, law_below, law_above=None, measure=dx):
               thickness_above=Constant(1.0 - f_below) * H,
               thickness_below=Constant(f_below) * H,
               flow_law_coefficient=Constant(law_below[0]),
-              flow_law_exponent=Constant(law_below[1]), measure=measure)
+              flow_law_exponent=Constant(law_below[1]), measure=measure, **extra)
     if law_above is not None:
         kw.update(flow_law_coefficient_above=Constant(law_above[0]),
                   flow_law_exponent_above=Constant(law_above[1]))
@@ -109,6 +109,29 @@ def test_empty_side_takes_the_other_law():
         d, d_other = rel(series, single), rel(series, other)
         print(f"  {label}: vs the law that remains {d:.1e}, vs the one that left {d_other:.1e}")
         assert d < TOL and d_other > 1e-3
+
+
+def test_empty_side_takes_the_other_law_under_the_floor():
+    """With a thickness floor far above the column, so that it engages
+    everywhere, an empty layer on either side still has weight zero."""
+    mesh, Q, H, Z, z = state()
+    floor = dict(thickness_floor=1e4)
+    for f_below, label, expect in ((0.0, "layer below empty", GBS),
+                                   (1.0, "layer above empty", TEMPERATE)):
+        series = closure(z, H, f_below, TEMPERATE, GBS, **floor)
+        single = closure(z, H, f_below, expect, **floor)
+        d = rel(series, single)
+        print(f"  {label}, floor engaged: vs the law that remains {d:.1e}")
+        assert d < TOL
+
+
+def test_nodal_stresses_need_degree_one():
+    mesh = firedrake.UnitSquareMesh(2, 2)
+    try:
+        create_function_space(mesh, 2, degree=2, stress_family="CG")
+    except ValueError:
+        return
+    raise AssertionError("degree 2 nodal stresses were accepted")
 
 
 def test_series_power_is_the_potential_of_the_series_closure():
@@ -181,6 +204,8 @@ def main():
     print("The series interface and nodal stresses, assembled:")
     test_series_with_one_law_is_the_single_law()
     test_empty_side_takes_the_other_law()
+    test_empty_side_takes_the_other_law_under_the_floor()
+    test_nodal_stresses_need_degree_one()
     test_series_power_is_the_potential_of_the_series_closure()
     test_nodal_closure_is_collocation()
     test_default_spaces_unchanged()

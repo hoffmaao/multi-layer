@@ -46,6 +46,13 @@ from icepack2.constants import ice_density as ρ_I, water_density as ρ_W, gravi
 # Re-export from icepack2 -- identical for per-layer use
 from icepack2.model.variational import flow_law  # noqa: F401
 
+#: Column thickness (m) below which the series weights fade from the true
+#: thickness fractions to an equal share.  It is far below any thickness
+#: floor, so an empty layer has weight exactly zero wherever there is ice,
+#: and it keeps the weights summing to one at ice-free nodes, where the
+#: coefficient on the stress would otherwise vanish.
+SERIES_WEIGHT_THICKNESS = 1e-3
+
 
 def _test(field, kwargs):
     """The test function paired with ``field``: the caller's, or the one
@@ -94,7 +101,10 @@ def interlayer_stress_law(**kwargs):
     compliance replaced by its thickness-weighted mean.  Two layers of one
     law give exactly the single-law form; a layer that has thinned to
     nothing has weight zero, so its rheology leaves no trace at the
-    interface, and the limit is reached continuously.
+    interface, and the limit is reached continuously.  The weights are
+    the true thickness fractions wherever the column is at least
+    :data:`SERIES_WEIGHT_THICKNESS` thick, and fade to an equal share only
+    as the column vanishes, so they sum to one everywhere.
 
     Parameters
     ----------
@@ -110,9 +120,12 @@ def interlayer_stress_law(**kwargs):
         Added to :math:`|S|^2` inside the power, so the Jacobian of a law
         with :math:`n < 3` stays finite at :math:`S = 0`.
     thickness_floor : float, optional
-        Floor on :math:`h^l + h^{l+1}` in the normalisation, which vanishes
-        with the column and is zero at ice-free nodes; the series weights
-        use the same floored sum, so they always sum to one.
+        Floor on :math:`h^l + h^{l+1}` in the velocity-jump normalisation,
+        which vanishes with the column and is zero at ice-free nodes.  The
+        series weights do not use it: they come from the true thicknesses,
+        so an empty layer has weight zero under the floor too.  The floor
+        is a dual-form device that the primal :func:`interlayer_power` does
+        not carry, so the two forms agree wherever it does not engage.
     measure : optional
         The integral the closure is taken in: ``dx`` (the default) for a
         cellwise stress; :func:`multilayer.model.utilities.vertex_measure`
@@ -135,9 +148,8 @@ def interlayer_stress_law(**kwargs):
     floor = kwargs.get("thickness_floor", 0.0)
     measure = kwargs.get("measure", dx)
 
-    h_sum = h_above + h_below
-    if floor:
-        h_sum = max_value(h_sum, Constant(floor))
+    h_total = h_above + h_below
+    h_sum = max_value(h_total, Constant(floor)) if floor else h_total
     Δu = (u_above - u_below) / h_sum
     S_2 = inner(S, S)
     if eps:
@@ -147,7 +159,9 @@ def interlayer_stress_law(**kwargs):
         if n_above is None:
             raise ValueError("a series interface needs flow_law_exponent_above "
                              "with flow_law_coefficient_above")
-        w_below = h_below / h_sum
+        δ = Constant(SERIES_WEIGHT_THICKNESS)
+        w_below = (h_below / max_value(h_total, δ)
+                   + Constant(0.5) * (Constant(1.0) - min_value(h_total, δ) / δ))
         c = w_below * c + (Constant(1.0) - w_below) * _shear_compliance(
             S_2, A_above, n_above, linear_above)
     return inner(c * S - Δu, σ) * measure
