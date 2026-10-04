@@ -39,7 +39,9 @@ def create_function_space(mesh, num_layers, degree=1, cell=None,
     mesh : firedrake.Mesh
     num_layers : int
     degree : int, optional
-        Polynomial degree for velocity (CG). Stresses use degree - 1 (DG).
+        Polynomial degree for velocity (CG). The membrane stress, and the
+        basal and interlayer stresses unless ``stress_family="CG"``, use
+        degree - 1 (DG).
     cell : ufl.Cell, optional
         The cell to build the elements on, ``mesh.ufl_cell()`` by default;
         passing it through unchanged keeps extruded meshes working.
