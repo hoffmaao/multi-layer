@@ -82,8 +82,15 @@ Both uniform ($n = 3$) and composite ($n = 4$ / $n = 1.8$) rheologies have been 
 
 ## Installation
 
-The package depends on [Firedrake](https://firedrakeproject.org/) and [icepack2](https://github.com/icepack/icepack2).
-With both installed:
+The package depends on [Firedrake](https://firedrakeproject.org/),
+[icepack2](https://github.com/icepack/icepack2) and
+[icepack_tools](https://github.com/hoffmaao/icepack_tools).  The mixed
+function space, the per-layer momentum balance, the interlayer stress
+law, the sliding law and the nodal-stress helpers live in icepack_tools,
+which builds the dual model for one layer or several; this package
+re-exports them under their usual names (`create_function_space`,
+`momentum_balance`, `interlayer_stress_law`, ...) and adds the layered
+model around them.  With those three installed:
 
 ```
 git clone https://github.com/hoffmaao/multi-layer.git
