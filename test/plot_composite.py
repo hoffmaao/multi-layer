@@ -35,14 +35,6 @@ def main():
     colors_uniform = {1: "C0", 2: "C1", 3: "C2", 4: "C4", 5: "C5"}
 
     fig, axes = plt.subplots(2, len(wavelengths_km), figsize=(20, 8))
-    from ismip_hom_b_composite import LAYER_EXPONENTS, LAYER_PREFACTORS, LAYER_FRACTIONS
-    n_b, n_t = LAYER_EXPONENTS
-    a_b, a_t = LAYER_PREFACTORS
-    pct = f"{LAYER_FRACTIONS[0]*100:.0f}%/{LAYER_FRACTIONS[1]*100:.0f}%"
-    fig.suptitle(
-        f"ISMIP-HOM B: composite (n={n_b} base, A={a_b:.0f} / n={n_t} top, A={a_t:.0f}, {pct}) vs uniform n=3",
-        fontsize=13,
-    )
 
     for col, Lkm in enumerate(wavelengths_km):
         Lx = Lkm * 1e3
@@ -79,7 +71,7 @@ def main():
 
         # Shear panel
         shear = u_top - u_bot
-        ax_shear.plot(x_hat, shear, "C3-", lw=2.0, label="Composite shear")
+        ax_shear.plot(x_hat, shear, "C3-", lw=2.0)
         ax_shear.axhline(0, color="gray", lw=0.5, ls=":")
 
         ax_vel.set_title(f"L = {Lkm} km")
@@ -88,9 +80,9 @@ def main():
             ax_vel.set_ylabel("Surface $v_x$ (m/yr)")
             ax_shear.set_ylabel("$v_{top} - v_{bot}$ (m/yr)")
 
-    axes[0, -1].legend(fontsize=5.5, loc="best", ncol=2)
-    axes[1, -1].legend(fontsize=7, loc="best")
-    fig.tight_layout()
+    fig.legend(*axes[0, -1].get_legend_handles_labels(), loc="lower center",
+               ncol=9, fontsize=10, frameon=False)
+    fig.tight_layout(rect=(0, 0.045, 1, 1))
     fig.savefig("figures/ismip_hom_b_composite.png", dpi=150)
     print("Saved figures/ismip_hom_b_composite.png")
 

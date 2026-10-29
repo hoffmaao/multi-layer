@@ -109,7 +109,6 @@ def plot_experiment_b():
     colors = {1: "C0", 2: "C1", 3: "C2", 4: "C4", 5: "C5"}
 
     fig, axes = plt.subplots(1, len(wavelengths_km), figsize=(20, 4), sharey=False)
-    fig.suptitle("ISMIP-HOM B: surface $v_x$ (m/yr), uniform n=3, L=1-5", fontsize=14)
 
     for ax, Lkm in zip(axes, wavelengths_km):
         Lx = Lkm * 1e3
@@ -121,7 +120,7 @@ def plot_experiment_b():
             mean = np.mean(vx_arr, axis=0)
             std = np.std(vx_arr, axis=0)
             ax.fill_between(x_ref, mean - std, mean + std, alpha=0.3, color="gray",
-                            label="Intercomp. mean $\\pm$ 1$\\sigma$")
+                            label="Intercomp. $\\pm 1\\sigma$")
             ax.plot(x_ref, mean, "k--", lw=1, label="Intercomp. mean")
 
         # Our multilayer results
@@ -136,10 +135,11 @@ def plot_experiment_b():
         if ax is axes[0]:
             ax.set_ylabel("$v_x$ (m/yr)")
 
-    axes[-1].legend(fontsize=7, loc="best")
-    fig.tight_layout()
+    fig.legend(*axes[-1].get_legend_handles_labels(), loc="lower center",
+               ncol=7, fontsize=10, frameon=False)
+    fig.tight_layout(rect=(0, 0.09, 1, 1))
     fig.savefig("figures/ismip_hom_b.png", dpi=150)
-    print(f"Saved figures/ismip_hom_b.png")
+    print("Saved figures/ismip_hom_b.png")
 
 
 def plot_experiment_d():
@@ -148,8 +148,7 @@ def plot_experiment_d():
     layer_counts = [1, 2, 3, 4, 5]
     colors = {1: "C0", 2: "C1", 3: "C2", 4: "C4", 5: "C5"}
 
-    fig, axes = plt.subplots(2, len(wavelengths_km), figsize=(20, 7), sharey="row")
-    fig.suptitle("ISMIP-HOM D: $v_x$ (m/yr), uniform n=3, L=1-5", fontsize=14)
+    fig, axes = plt.subplots(2, len(wavelengths_km), figsize=(20, 7))
 
     for col, Lkm in enumerate(wavelengths_km):
         Lx = Lkm * 1e3
@@ -163,7 +162,8 @@ def plot_experiment_d():
             mean_s = np.mean(vx_s, axis=0)
             std_s = np.std(vx_s, axis=0)
             ax_s.fill_between(x_ref, mean_s - std_s, mean_s + std_s,
-                              alpha=0.3, color="gray")
+                              alpha=0.3, color="gray",
+                              label="Intercomp. $\\pm 1\\sigma$")
             ax_s.plot(x_ref, mean_s, "k--", lw=1, label="Intercomp. mean")
         if vx_base_all:
             vx_b = np.array(vx_base_all)
@@ -187,10 +187,11 @@ def plot_experiment_d():
             ax_s.set_ylabel("Surface $v_x$ (m/yr)")
             ax_b.set_ylabel("Base $v_x$ (m/yr)")
 
-    axes[0, -1].legend(fontsize=7, loc="best")
-    fig.tight_layout()
+    fig.legend(*axes[0, -1].get_legend_handles_labels(), loc="lower center",
+               ncol=7, fontsize=10, frameon=False)
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
     fig.savefig("figures/ismip_hom_d.png", dpi=150)
-    print(f"Saved figures/ismip_hom_d.png")
+    print("Saved figures/ismip_hom_d.png")
 
 
 if __name__ == "__main__":
