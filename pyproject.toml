@@ -7,8 +7,14 @@ authors = [
 description = "Multilayer ice-flow model in dual form, generalising the shallow shelf approximation"
 license = { text = "GPL-3.0-or-later" }
 requires-python = ">=3.8"
+# Neither is on PyPI: install them first from
+# https://github.com/icepack/icepack2 and
+# https://github.com/hoffmaao/icepack_tools.  Any installed copy, such as
+# an editable checkout, satisfies these.  icepack_tools owns the dual-model
+# building blocks this package re-exports.
 dependencies = [
-    "icepack2@file:///home/andrew/icepack2",
+    "icepack2",
+    "icepack_tools",
 ]
 
 [project.urls]
