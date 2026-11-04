@@ -10,10 +10,12 @@
 # The full text of the license can be found in the file LICENSE in the
 # multilayer source directory or at <http://www.gnu.org/licenses/>.
 
-r"""Plot composite rheology (n=4/1.8, A=40/1.0) vs uniform n=3 multilayer.
+r"""Plot composite rheology (n=4/1.8) vs uniform n=3 multilayer.
 
-Compares the two-layer composite against uniform n=3 with L=1,2,3,4,5
-layers, for ISMIP-HOM experiment B.
+Compares the composite column of ismip_hom_b_composite.py (each rheology
+split into ``SUBLAYERS`` layers) against uniform n=3 with L=1,2,3,4,5
+layers, for ISMIP-HOM experiment B.  The lower panels show the top
+layer's velocity minus the velocity at the mid-height of the basal ice.
 """
 import sys
 from pathlib import Path
