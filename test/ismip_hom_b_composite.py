@@ -13,23 +13,29 @@
 r"""ISMIP-HOM Experiment B with composite rheology: n=4 bottom, n=1.8 top.
 
 Same geometry as ismip_hom_b.py (frozen base, sinusoidal bed bumps) but
-with per-layer rheology following Goldsby & Kohlstedt / Ranganathan & Minchew:
-  - Layer 1 (bottom, 200/2500 = 8%):  n=4 dislocation creep, A=40 MPa^{-4} yr^{-1}
-  - Layer 2 (top,    2300/2500 = 92%): n=1.8 grain boundary sliding, A=1.0 MPa^{-1.8} yr^{-1}
+with per-layer rheology following Goldsby & Kohlstedt / Ranganathan & Minchew
+(LAYER_FRACTIONS, LAYER_EXPONENTS, LAYER_PREFACTORS below):
+  - Layer 1 (bottom, 15 %): n = 4 dislocation creep, A = 1000 MPa^-4 yr^-1
+  - Layer 2 (top,    85 %): n = 1.8 grain-boundary sliding, A = 6.3 MPa^-1.8 yr^-1
+
+Each layer is ``layer_power`` under its own law (membrane and shear stress
+in one flow law, the interface in series), with ``slope_coupling`` for the
+layers following the bed.  Ice density is ISMIP-HOM's, 910 kg m^-3.
 """
 import numpy as np
 import math
 import firedrake
 from firedrake import (
-    Constant, Function, sin, dx, dS, FacetNormal,
-    inner, sym, grad, avg, jump, derivative,
+    Constant, Function, sin, dx, inner, sym, grad, derivative,
     NonlinearVariationalProblem, NonlinearVariationalSolver,
 )
-from icepack2.model.minimization import viscous_power
-from icepack2.constants import ice_density as ρ_I, gravity as g
-from multilayer.model.minimization import basal_stress_power, interlayer_power
+from icepack2.constants import gravity as g, year
+from multilayer.model.minimization import layer_power, slope_coupling
 from multilayer.model.utilities import create_function_space, split_fields, layer_thicknesses
 
+
+#: ISMIP-HOM's ice density, 910 kg m^-3, in icepack2 units (MPa yr^2 m^-2).
+ρ_I = 910 / year**2 * 1e-6
 
 alpha_deg = 0.5
 tan_alpha = math.tan(math.radians(alpha_deg))
@@ -39,7 +45,12 @@ LAYER_EXPONENTS = [4.0, 1.8]
 # Calibrated to match Glen n=3, A=100 at tau_ref = 0.1 MPa:
 #   A_new = A_ref * tau_ref^(n_ref - n_new)
 LAYER_PREFACTORS = [1000.0, 6.3]  # MPa^{-n} yr^{-1}
-NUM_LAYERS = 2
+#: Equal layers each rheology is split into.  Against the first-order
+#: solution (multilayer.first_order), one per rheology (two layers) is off by
+#: 14-27 % (RMS over the layers, 10-160 km): one layer cannot carry the shear
+#: of 85 % of the column.  Two per rheology are off by 3-6 %, four by
+#: 0.8-1.6 % (2 % at the top layer).
+SUBLAYERS = 4
 
 sparams = {
     "snes_type": "newtonls",
@@ -52,8 +63,15 @@ sparams = {
 }
 
 
-def solve_ismip_hom_b_composite(L_domain, nx=40):
-    L = NUM_LAYERS
+def solve_ismip_hom_b_composite(L_domain, nx=40, sublayers=SUBLAYERS):
+    r"""Composite ISMIP-HOM B with each rheology split into ``sublayers``
+    equal layers.  Returns the top layer's velocity (nearest the surface),
+    the velocity at the mid-height of the basal (n = 4) ice, x / L, and
+    the mixed solution."""
+    k = sublayers
+    part = [0] * k + [1] * k                # rheology of each layer, bottom up
+    fractions = [LAYER_FRACTIONS[p] / k for p in part]
+    L = len(fractions)
     Lx = L_domain
 
     mesh = firedrake.PeriodicRectangleMesh(nx, nx, Lx, Lx, direction="x")
@@ -62,19 +80,15 @@ def solve_ismip_hom_b_composite(L_domain, nx=40):
     Q = firedrake.FunctionSpace(mesh, "CG", 1)
     omega = Constant(2 * np.pi / Lx)
     h_total = Function(Q).interpolate(Constant(1000.0) - Constant(500.0) * sin(omega * x))
-    h_layers = layer_thicknesses(h_total, L, fractions=LAYER_FRACTIONS)
+    h_layers = layer_thicknesses(h_total, L, fractions=fractions)
 
     # Per-layer rheology
-    n_consts = [Constant(e) for e in LAYER_EXPONENTS]
-    A_layers = [Constant(a) for a in LAYER_PREFACTORS]
+    n_consts = [Constant(LAYER_EXPONENTS[p]) for p in part]
+    A_layers = [Constant(LAYER_PREFACTORS[p]) for p in part]
 
     Z = create_function_space(mesh, L)
     z = Function(Z)
     fields = split_fields(firedrake.split(z), L)
-    ν = FacetNormal(mesh)
-
-    # Flat surface for momentum (constant slope added separately)
-    s_zero = Function(Q).assign(0.0)
 
     Lagrangian = Constant(0) * dx(mesh)
 
@@ -85,9 +99,11 @@ def solve_ismip_hom_b_composite(L_domain, nx=40):
         S_below = fl["interlayer_stress"]
         S_above = fields[l + 1]["interlayer_stress"] if l < L - 1 else None
 
-        # Per-layer viscous power
-        Lagrangian += viscous_power(
-            membrane_stress=M_l, thickness=h_l,
+        # Membrane and shear in one flow law, each layer under its own law;
+        # the bottom layer's lower face is the frozen bed
+        Lagrangian += layer_power(
+            membrane_stress=M_l, stress_below=S_below, stress_above=S_above,
+            thickness=h_l,
             flow_law_coefficient=A_layers[l], flow_law_exponent=n_consts[l],
         )
 
@@ -100,22 +116,12 @@ def solve_ismip_hom_b_composite(L_domain, nx=40):
         # Constant driving stress
         Lagrangian += ρ_I * g * h_l * Constant(tan_alpha) * u_l[0] * dx
 
-    # Basal stress power (frozen base, uses bottom layer rheology)
-    Lagrangian += basal_stress_power(
-        basal_stress=fields[0]["interlayer_stress"],
-        thickness=h_layers[0],
-        flow_law_coefficient=A_layers[0],
-        flow_law_exponent=n_consts[0],
+    # Layers follow the rippled bed
+    Lagrangian += slope_coupling(
+        velocities=[f["velocity"] for f in fields],
+        membrane_stresses=[f["membrane_stress"] for f in fields],
+        thicknesses=h_layers, frozen_bed=True,
     )
-
-    # Interlayer stress power (uses bottom layer rheology at interface)
-    for l in range(1, L):
-        Lagrangian += interlayer_power(
-            interlayer_stress=fields[l]["interlayer_stress"],
-            thickness_above=h_layers[l], thickness_below=h_layers[l - 1],
-            flow_law_coefficient=A_layers[l - 1],
-            flow_law_exponent=n_consts[l - 1],
-        )
 
     F = derivative(Lagrangian, z)
     bcs = [firedrake.DirichletBC(Z.sub(3 * l).sub(1), 0, (1, 2)) for l in range(L)]
@@ -128,9 +134,9 @@ def solve_ismip_hom_b_composite(L_domain, nx=40):
     A_start = 100.0
     lambdas = np.concatenate([np.linspace(0, 0.8, 8), np.linspace(0.8, 1.0, 8)])
     for λ in lambdas:
-        for l in range(L):
-            n_consts[l].assign((1 - λ) + λ * LAYER_EXPONENTS[l])
-            log_A = (1 - λ) * np.log(A_start) + λ * np.log(LAYER_PREFACTORS[l])
+        for l, p in enumerate(part):
+            n_consts[l].assign((1 - λ) + λ * LAYER_EXPONENTS[p])
+            log_A = (1 - λ) * np.log(A_start) + λ * np.log(LAYER_PREFACTORS[p])
             A_layers[l].assign(np.exp(log_A))
         solver.solve()
 
@@ -140,8 +146,13 @@ def solve_ismip_hom_b_composite(L_domain, nx=40):
     x_hat = np.linspace(0, 1, n_sample)
     y_mid = Lx / 2
 
-    u_bottom = np.array([subfunctions[0].at([xi * Lx, y_mid])[0] for xi in x_hat])
-    u_top = np.array([subfunctions[3].at([xi * Lx, y_mid])[0] for xi in x_hat])
+    def layer(l):
+        return np.array([subfunctions[3 * l].at([xi * Lx, y_mid])[0] for xi in x_hat])
+
+    # Mid-height of the basal ice: the middle layer of k, or the mean of
+    # the two that meet there.
+    u_bottom = 0.5 * (layer((k - 1) // 2) + layer(k // 2))
+    u_top = layer(L - 1)
 
     return u_top, u_bottom, x_hat, z
 
@@ -152,7 +163,7 @@ def main():
 
     wavelengths = [160e3, 80e3, 40e3, 20e3, 10e3]
 
-    print("ISMIP-HOM B: composite rheology (n=4 bottom, n=2 top) vs uniform n=3")
+    print("ISMIP-HOM B: composite rheology (n=4 bottom, n=1.8 top) vs uniform n=3")
     print("=" * 75)
     print(f"{'L (km)':>8s}  {'composite top':>14s}  {'composite bot':>14s}  "
           f"{'uniform L=1':>12s}  {'uniform L=2':>12s}  {'uniform L=3':>12s}")
@@ -190,7 +201,7 @@ def main():
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(1, len(wavelengths), figsize=(18, 4), sharey=False)
-    fig.suptitle("ISMIP-HOM B: composite (n=4/2) vs uniform (n=3)", fontsize=14)
+    fig.suptitle("ISMIP-HOM B: composite (n=4/1.8) vs uniform (n=3)", fontsize=14)
 
     for ax, Lx in zip(axes, wavelengths):
         nx = min(max(20, int(40 * 80e3 / Lx)), 80)
@@ -198,7 +209,7 @@ def main():
         u_1, _, _ = solve_ismip_hom_b(Lx, 1, nx=nx)
         u_2, _, _ = solve_ismip_hom_b(Lx, 2, nx=nx)
 
-        ax.plot(x_hat, u_top_c, "C0-", lw=2, label="composite top (n=4/2)")
+        ax.plot(x_hat, u_top_c, "C0-", lw=2, label="composite top (n=4/1.8)")
         ax.plot(x_hat, u_bot_c, "C0--", lw=1.5, label="composite bot")
         ax.plot(x_hat, u_1, "C2-", lw=1, alpha=0.7, label="uniform L=1 (n=3)")
         ax.plot(x_hat, u_2, "C1-", lw=1, alpha=0.7, label="uniform L=2 (n=3)")

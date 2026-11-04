@@ -2,7 +2,7 @@
 
 This package implements the multilayer model described in [Jouvet (2015)](https://doi.org/10.1017/jfm.2014.689), which splits the ice column into a stack of thin layers, each with its own horizontal velocity.
 Adjacent layers are coupled through interlayer shear tractions.
-For a single layer the model reduces to the shallow shelf approximation (SSA); as the number of layers increases, the solution converges to other hybridized stokes solutions.
+As the number of layers increases, the solution converges to the first-order (Blatter-Pattyn) solution, at second order in the layer thickness.
 
 Unlike the SSA, which treats the ice as a plug, the multilayer model captures vertical shear.
 This matters wherever basal drag is significant (near grounding lines, in ice streams, and in regions with strong bed topography). The model uses the **dual formulation** from [icepack2](https://github.com/icepack/icepack2), where membrane stress and interlayer shear stress are explicit unknowns alongside velocity.
@@ -14,14 +14,34 @@ This formulation is well-posed at zero thickness, which enables natural handling
 Each layer has three fields: velocity, membrane stress, and interlayer stress.
 The interlayer stress has the same mathematical structure as a friction law --it relates the shear stress at an interface to the normalised velocity between layers.
 
-The action functional is:
+The action functional (`multilayer.model.minimization`) is:
 
-- **Viscous power** per layer (from icepack2, unchanged)
-- **Interlayer power** at each interface (new: dissipation from vertical shear)
-- **Basal stress power** at the bed (new: for frozen or sliding base)
-- **Momentum balance** per layer (extended: includes interlayer coupling)
+- **Layer power** per layer (`layer_power`): the layer is taken as two
+  half-layers under its own flow law, each with one effective stress made
+  of the membrane stress and the shear on its face, as Glen's law has.
+  Every interface is then in series (each half-layer shears under its own
+  law), and the bottom half-layer shears under the basal stress on a
+  sliding bed as well as a frozen one.
+- **Momentum balance** per layer (`momentum_balance`, including the
+  interlayer coupling)
+- **Slope coupling** (`slope_coupling`): layers follow the bed, so the
+  strain rate along a layer differs from the one at constant depth by the
+  layer slope times the vertical shear; this restores it.
+- **Friction power** at a sliding bed (`friction_power`)
 
 Taking the Gateaux derivative of the total action recovers all the weak-form equations.
+
+The older terms -- `viscous_power` per layer with `interlayer_power` at the
+interfaces and `basal_stress_power` at a frozen bed -- give the membrane
+and shear stresses separate flow laws.  They agree with `layer_power` for
+linear ice and for a laterally uniform slab and are kept for existing
+models, but for $n > 1$ they make ice that both stretches and shears too
+stiff, `friction_power` alone with them drops the shear of the bottom
+half-layer, and without `slope_coupling` a column on a sloping bed does not
+converge to the first-order solution (see [ISMIP-HOM
+verification](#ismip-hom-verification)).  The residual-form closures in
+`multilayer.model.variational` (from `icepack_tools`) are the derivatives
+of these older terms.
 
 ## Composite rheology
 
@@ -38,11 +58,11 @@ pinches out up-glacier, say -- should leave no trace there: the model with
 it must be the model without it.  Two choices in the discretisation decide
 whether it does, and both are options of this package.
 
-**Series interfaces.** By convention an interface is closed with the law
-of the layer below it, so an empty basal layer's rheology still governs
-the shear above it.  Given the law of the layer above as well,
-`interlayer_stress_law` (and `interlayer_power` in the primal form) puts
-the two half-layers in series: the shear stress is continuous across the
+**Series interfaces.** Closing an interface with the law of the layer
+below it alone lets an empty basal layer's rheology still govern the
+shear above it.  `layer_power` always puts the two half-layers in series,
+and so do `interlayer_stress_law` and `interlayer_power` when given the law
+of the layer above as well: the shear stress is continuous across the
 interface and each half-layer shears under its own law, so the closure's
 compliance is the thickness-weighted mean of the two.  Two layers of one
 law give exactly the single-law form; a layer of zero thickness has
@@ -72,12 +92,41 @@ two-layer model, a thinning layer converges to the empty one -- are in
 
 ## ISMIP-HOM verification
 
-The model has been tested against the ISMIP-HOM benchmark experiments (Pattyn et al. 2008):
+Each layer velocity stands for the velocity at the layer's mid-height, so
+as layers are added the column should converge to the first-order
+solution there.  `multilayer.first_order` solves the first-order
+flowline problem independently of this package (Q2 elements on a
+terrain-following mesh with a level on every change of flow law); at
+ISMIP-HOM's density it reproduces the intercomparison median (Pattyn et
+al. 2008) to 0.1-1.4 % for experiment B at 20-160 km and D at 5-160 km,
+where the full-Stokes and first-order submissions agree.
 
-- **Experiment B** (frozen base, sinusoidal bed bumps): surface velocities converge to the intercomparison mean as the number of layers increases from 1 to 5.
-- **Experiment D** (sliding base, sinusoidal friction): all layer counts produce consistent results within the intercomparison spread.
+Against it, the error of the layer velocities (RMS at the layer
+mid-heights, relative to the largest speed) falls about fourfold each time
+the layers are halved:
 
-Both uniform ($n = 3$) and composite ($n = 4$ / $n = 1.8$) rheologies have been verified across wavelengths from 10 to 160 km.
+| case | 5 layers | 10 layers | 20 layers |
+|---|---|---|---|
+| ISMIP-HOM B, 80 km, $n = 3$ | 2.7 % | 0.69 % | 0.18 % |
+| ISMIP-HOM B, 10 km, $n = 3$ | 4.3 % | 1.1 % | 0.26 % |
+| sliding slab (ISMIP-HOM D friction, 6 km, 600 m), $n = 1.8$ | 3.2 % (4 layers) | 0.79 % (8) | 0.19 % (16) |
+| the same slab with 200 m of $n = 4$ basal ice | 5.1 % (4 layers) | 1.3 % (8) | |
+
+Without the fixes of `layer_power` and `slope_coupling` (the older terms
+above, which every version up to this one used) the column does not
+converge: B levels off 18 % from the first-order solution at 10 km and
+10 % at the peak at 80 km with 40 layers, and the sliding slab 7.5 % low.
+`test/first_order_test.py` checks the convergence.
+
+`ismip_hom_b.py` and `ismip_hom_d.py` use ISMIP-HOM's ice density,
+910 kg m$^{-3}$ (icepack2's is 917, which makes B about 2.3 % fast), and
+`plot_ismip_hom.py` compares them with the intercomparison median and its
+16-84 % band: a few submissions sit far from the rest (in D at 80 km one
+peaks at 192 m/yr and one at 61, against a cluster near 97), and drag the
+mean.  Five D submissions (rhi1-rhi5) are half a period out of phase,
+peaking at $L/4$ rather than over the slippery spot at $3L/4$, and are
+shifted back.  The figures plot the top layer's velocity, which sits half
+a layer below the surface.
 
 
 ## Installation
@@ -118,7 +167,12 @@ python plot_ismip_hom.py       # Comparison with intercomparison data
 python plot_composite.py       # Composite vs uniform comparison
 python plot_schematic.py       # 3D schematic figure
 python series_interface_test.py  # series interfaces and nodal stresses, assembled
+python first_order_test.py     # convergence to the first-order solution (a few minutes)
 ```
+
+`plot_ismip_hom.py` and `plot_composite.py` read the intercomparison
+submissions from `/tmp/ismip_hom_data/ismip_all` (the Pattyn et al. 2008
+supplement).
 
 ## Running the MISMIP+ experiment
 

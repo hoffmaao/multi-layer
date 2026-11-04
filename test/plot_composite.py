@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 
 from ismip_hom_b_composite import solve_ismip_hom_b_composite
 from ismip_hom_b import solve_ismip_hom_b
-from plot_ismip_hom import load_intercomparison_data
+from plot_ismip_hom import SPREAD_LABEL, load_intercomparison_data, spread
 
 
 def main():
@@ -46,13 +46,12 @@ def main():
         x_ref, vx_surf_all, _ = load_intercomparison_data("b", Lkm)
         if vx_surf_all:
             vx_arr = np.array(vx_surf_all)
-            mean = np.mean(vx_arr, axis=0)
-            std = np.std(vx_arr, axis=0)
+            lo, median, hi = spread(vx_arr)
             ax_vel.fill_between(
-                x_ref, mean - std, mean + std, alpha=0.2, color="gray",
-                label="Intercomp. $\\pm 1\\sigma$",
+                x_ref, lo, hi, alpha=0.2, color="gray",
+                label=SPREAD_LABEL,
             )
-            ax_vel.plot(x_ref, mean, "k--", lw=0.8, label="Intercomp. mean")
+            ax_vel.plot(x_ref, median, "k--", lw=0.8, label="Intercomp. median")
 
         # Uniform n=3 multilayer: L=1 through 5
         for nl in uniform_layers:

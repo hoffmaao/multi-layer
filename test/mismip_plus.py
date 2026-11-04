@@ -66,7 +66,6 @@ from firedrake import (
     RectangleMesh,
     exp,
     dx,
-    ds,
     max_value,
     as_vector,
     derivative,
@@ -284,8 +283,12 @@ def build_two_layer(mesh, Q, thickness, surface, N):
         fl = fields[l]
         S_above = fields[l + 1]["interlayer_stress"] if l < L - 1 else None
 
-        Lagrangian += minimization.viscous_power(
-            membrane_stress=fl["membrane_stress"], thickness=h_l,
+        # Membrane and shear in one flow law, each layer under its own law;
+        # the bottom layer's lower face carries the basal drag.
+        Lagrangian += minimization.layer_power(
+            membrane_stress=fl["membrane_stress"],
+            stress_below=fl["interlayer_stress"], stress_above=S_above,
+            thickness=h_l,
             flow_law_coefficient=A_consts[l], flow_law_exponent=n_consts[l],
         )
         Lagrangian += minimization.momentum_balance(
@@ -309,13 +312,12 @@ def build_two_layer(mesh, Q, thickness, surface, N):
         sliding_exponent=Constant(SLIDING_M),
     )
 
-    # Interlayer shear power at the internal interface (base-layer rheology).
-    for l in range(1, L):
-        Lagrangian += minimization.interlayer_power(
-            interlayer_stress=fields[l]["interlayer_stress"],
-            thickness_above=h_layers[l], thickness_below=h_layers[l - 1],
-            flow_law_coefficient=A_consts[l - 1], flow_law_exponent=n_consts[l - 1],
-        )
+    # Layers follow the bed and the shelf base.
+    Lagrangian += minimization.slope_coupling(
+        velocities=[f["velocity"] for f in fields],
+        membrane_stresses=[f["membrane_stress"] for f in fields],
+        thicknesses=h_layers,
+    )
 
     F = derivative(Lagrangian, z)
     bcs = []

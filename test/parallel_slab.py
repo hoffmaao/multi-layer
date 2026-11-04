@@ -133,21 +133,22 @@ def solve_parallel_slab(num_layers, nx=16):
         h_l = h_layers[l]
         fl = fields[l]
 
-        # Viscous power per layer.  The composite form matters here: the
-        # exact slab solution has M = 0, where the pure-creep dual Hessian
-        # |M|^{n-1} vanishes and the Jacobian is singular for n > 1.  The
-        # linear regulariser keeps the M block invertible without
-        # perturbing the M = 0 solution.
-        Lagrangian += minimization.composite_viscous_power(
-            membrane_stress=fl["membrane_stress"],
-            thickness=h_l,
-            **rheology,
-        )
-
-        # Momentum balance per layer
         S_above = fields[l + 1]["interlayer_stress"] if l < L - 1 else None
         S_below = fl["interlayer_stress"]
 
+        # Membrane and shear in one flow law; the bottom layer's lower face
+        # is the frozen bed.  The exact slab solution has M = 0, where a
+        # membrane law of its own would have a vanishing |M|^(n-1) Hessian
+        # and a singular Jacobian for n > 1; here the shear in the
+        # effective stress keeps the M block invertible.  The layers
+        # parallel the surface, so there is no slope coupling.
+        Lagrangian += minimization.layer_power(
+            membrane_stress=fl["membrane_stress"],
+            stress_below=S_below, stress_above=S_above,
+            thickness=h_l, **rheology,
+        )
+
+        # Momentum balance per layer
         Lagrangian += minimization.momentum_balance(
             velocity=fl["velocity"],
             membrane_stress=fl["membrane_stress"],
@@ -155,22 +156,6 @@ def solve_parallel_slab(num_layers, nx=16):
             surface=s,
             stress_above=S_above,
             stress_below=S_below,
-        )
-
-    # Basal stress power (frozen base, no-slip)
-    Lagrangian += minimization.basal_stress_power(
-        basal_stress=fields[0]["interlayer_stress"],
-        thickness=h_layers[0],
-        **rheology,
-    )
-
-    # Interlayer stress power for interior interfaces
-    for l in range(1, L):
-        Lagrangian += minimization.interlayer_power(
-            interlayer_stress=fields[l]["interlayer_stress"],
-            thickness_above=h_layers[l],
-            thickness_below=h_layers[l - 1],
-            **rheology,
         )
 
     # Take derivative to get the residual
