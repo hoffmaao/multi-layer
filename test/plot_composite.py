@@ -10,10 +10,12 @@
 # The full text of the license can be found in the file LICENSE in the
 # multilayer source directory or at <http://www.gnu.org/licenses/>.
 
-r"""Plot composite rheology (n=4/1.8, A=40/1.0) vs uniform n=3 multilayer.
+r"""Plot composite rheology (n=4/1.8) vs uniform n=3 multilayer.
 
-Compares the two-layer composite against uniform n=3 with L=1,2,3,4,5
-layers, for ISMIP-HOM experiment B.
+Compares the composite column of ismip_hom_b_composite.py (each rheology
+split into ``SUBLAYERS`` layers) against uniform n=3 with L=1,2,3,4,5
+layers, for ISMIP-HOM experiment B.  The lower panels show the top
+layer's velocity minus the velocity at the mid-height of the basal ice.
 """
 import sys
 from pathlib import Path
@@ -26,7 +28,7 @@ import matplotlib.pyplot as plt
 
 from ismip_hom_b_composite import solve_ismip_hom_b_composite
 from ismip_hom_b import solve_ismip_hom_b
-from plot_ismip_hom import load_intercomparison_data
+from plot_ismip_hom import SPREAD_LABEL, load_intercomparison_data, spread
 
 
 def main():
@@ -46,13 +48,12 @@ def main():
         x_ref, vx_surf_all, _ = load_intercomparison_data("b", Lkm)
         if vx_surf_all:
             vx_arr = np.array(vx_surf_all)
-            mean = np.mean(vx_arr, axis=0)
-            std = np.std(vx_arr, axis=0)
+            lo, median, hi = spread(vx_arr)
             ax_vel.fill_between(
-                x_ref, mean - std, mean + std, alpha=0.2, color="gray",
-                label="Intercomp. $\\pm 1\\sigma$",
+                x_ref, lo, hi, alpha=0.2, color="gray",
+                label=SPREAD_LABEL,
             )
-            ax_vel.plot(x_ref, mean, "k--", lw=0.8, label="Intercomp. mean")
+            ax_vel.plot(x_ref, median, "k--", lw=0.8, label="Intercomp. median")
 
         # Uniform n=3 multilayer: L=1 through 5
         for nl in uniform_layers:

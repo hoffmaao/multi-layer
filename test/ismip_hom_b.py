@@ -25,6 +25,13 @@ Note on periodic surface:
   The surface z_s = -x tan(alpha) is NOT periodic, so we pass surface = 0
   to momentum_balance (zeroing the driving-stress and DG jump terms)
   and add the constant driving stress rho*g*h^l*tan(alpha) separately.
+  The layers then slope with the bed relative to the surface, which
+  ``slope_coupling`` accounts for.
+
+The column is ``layer_power`` per layer (membrane and shear stress in one
+flow law, interfaces in series) with ``slope_coupling``: the action that
+converges to the first-order model as layers are added.  Ice density is
+ISMIP-HOM's, 910 kg m^-3, rather than icepack2's 917.
 """
 import numpy as np
 import math
@@ -38,9 +45,12 @@ from firedrake import (
     NonlinearVariationalProblem,
     NonlinearVariationalSolver,
 )
-from icepack2.constants import ice_density as ρ_I, gravity as g, glen_flow_law
+from icepack2.constants import gravity as g, glen_flow_law, year
 from multilayer.model import minimization, utilities
 
+
+#: ISMIP-HOM's ice density, 910 kg m^-3, in icepack2 units (MPa yr^2 m^-2).
+ρ_I = 910 / year**2 * 1e-6
 
 alpha_deg = 0.5
 tan_alpha = math.tan(math.radians(alpha_deg))
@@ -81,12 +91,16 @@ def solve_ismip_hom_b(L_domain, num_layers, nx=40):
     for l in range(L):
         h_l = h_layers[l]
         fl = fields[l]
+        S_above = fields[l + 1]["interlayer_stress"] if l < L - 1 else None
 
-        Lagrangian += minimization.viscous_power(
-            membrane_stress=fl["membrane_stress"], thickness=h_l, **rheology,
+        # Membrane and shear in one flow law; the basal stress is the
+        # bottom layer's lower face (frozen base)
+        Lagrangian += minimization.layer_power(
+            membrane_stress=fl["membrane_stress"],
+            stress_below=fl["interlayer_stress"], stress_above=S_above,
+            thickness=h_l, **rheology,
         )
 
-        S_above = fields[l + 1]["interlayer_stress"] if l < L - 1 else None
         Lagrangian += minimization.momentum_balance(
             velocity=fl["velocity"],
             membrane_stress=fl["membrane_stress"],
@@ -95,26 +109,18 @@ def solve_ismip_hom_b(L_domain, num_layers, nx=40):
             basal_stress=fl["interlayer_stress"] if l == 0 else None,
             stress_above=S_above,
             stress_below=fl["interlayer_stress"] if l > 0 else None,
+            ice_density=ρ_I,
         )
 
         # Constant driving stress (replaces grad(s) for periodic domain)
         Lagrangian += ρ_I * g * h_l * Constant(tan_alpha) * fl["velocity"][0] * dx
 
-    # Basal stress power (frozen base)
-    Lagrangian += minimization.basal_stress_power(
-        basal_stress=fields[0]["interlayer_stress"],
-        thickness=h_layers[0],
-        **rheology,
+    # Layers follow the rippled bed
+    Lagrangian += minimization.slope_coupling(
+        velocities=[f["velocity"] for f in fields],
+        membrane_stresses=[f["membrane_stress"] for f in fields],
+        thicknesses=h_layers, frozen_bed=True,
     )
-
-    # Interlayer stress power (interior interfaces)
-    for l in range(1, L):
-        Lagrangian += minimization.interlayer_power(
-            interlayer_stress=fields[l]["interlayer_stress"],
-            thickness_above=h_layers[l],
-            thickness_below=h_layers[l - 1],
-            **rheology,
-        )
 
     F = derivative(Lagrangian, z)
     bcs = [firedrake.DirichletBC(Z.sub(3 * l).sub(1), 0, (1, 2)) for l in range(L)]

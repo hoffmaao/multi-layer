@@ -15,8 +15,35 @@ r"""Action functional (minimization form) for the multilayer model
 Each function returns a UFL Form contributing to the Lagrangian whose
 Gateaux derivative recovers the variational-form equations.  Functions
 that are identical to their icepack2 counterparts are re-exported;
-multilayer-specific terms (interlayer power, basal stress power, and the
-extended momentum balance) are new.
+multilayer-specific terms are new.
+
+The column action that converges to the first-order (Blatter-Pattyn)
+model as layers are added is, for layers :math:`l = 1 \ldots L` from the
+bed up,
+
+.. code::
+
+    sum_l layer_power(l)          membrane and shear in one flow law
+    + sum_l momentum_balance(l)   with the driving stress
+    + slope_coupling              layers that follow the bed
+    + friction_power              sliding beds only
+
+:func:`layer_power` splits each layer into two half-layers under its own
+law, each with one effective stress from the membrane stress and the
+shear on its face, so the interfaces are in series and the bottom
+half-layer shears under the basal stress on a sliding bed as well as on a
+frozen one.  :func:`slope_coupling` restores the strain rate at constant
+height on layers that slope.  Against a first-order reference both
+together converge at second order in the layer thickness (ISMIP-HOM B and
+D, rheology changing with height).
+
+The older terms -- :func:`viscous_power` per layer with
+:func:`interlayer_power` and :func:`basal_stress_power` -- give each stress
+its own flow law.  They agree with :func:`layer_power` for linear ice and
+for a laterally uniform slab, and are kept for existing models, but for
+:math:`n > 1` they make ice that both stretches and shears too stiff, and
+with :func:`friction_power` alone they drop the shear of the bottom
+half-layer.
 """
 
 import ufl
@@ -35,6 +62,7 @@ from firedrake import (
     FacetNormal,
     min_value,
     max_value,
+    tr,
 )
 from icepack2.constants import ice_density as ρ_I, water_density as ρ_W, gravity as g
 
@@ -48,6 +76,146 @@ def _shear_power(S_2, h, A, n):
     :math:`h\,\frac{A}{n+1}|S|^{n+1}`."""
     S_n = conditional(eq(n, 1), S_2, S_2 ** ((n + 1) / 2))
     return h * A / (n + 1) * S_n
+
+
+def _membrane_invariant(M):
+    r""":math:`|M|^2_{\rm eff}`: the membrane part of the effective stress
+    squared, :math:`\tfrac12 \tau'_{ij}\tau'_{ij}` over the horizontal
+    deviatoric stresses and :math:`\tau_{zz} = -\operatorname{tr}\tau'`
+    (icepack2's convention)."""
+    mesh = ufl.domain.extract_unique_domain(M)
+    d = mesh.geometric_dimension          # FD2026: attribute; FD<=2025: method
+    d = d() if callable(d) else d
+    return (inner(M, M) - tr(M) ** 2 / (d + 1)) / 2
+
+
+def _half_layer_power(M_2, S, h, A, n):
+    r"""One half-layer of a layer of thickness ``h``:
+    :math:`\tfrac{h}{2}\,\tfrac{2A}{n+1}\,\tau_e^{n+1}` with
+    :math:`\tau_e^2 = |M|^2_{\rm eff} + |S|^2` (``S`` None at the surface)."""
+    t_2 = M_2 if S is None else M_2 + inner(S, S)
+    t_n = conditional(eq(n, 1), t_2, t_2 ** ((n + 1) / 2))
+    return h * A / (n + 1) * t_n
+
+
+def layer_power(**kwargs):
+    r"""Return one layer's dissipation, membrane and shear in one flow law
+
+    Glen's law has one effective stress for every component,
+    :math:`\tau_e^2 = \tfrac12\tau'_{ij}\tau'_{ij}`, here the membrane part
+    plus the shear :math:`|S|^2`.  The shear in a layer runs from the stress
+    on its lower face to the one on its upper face, so the layer is taken as
+    two half-layers, each with the membrane stress and the shear of its
+    face:
+
+    .. math::
+        \int \frac{h^l}{2}\,\frac{2A_l}{n_l+1}\left[
+        \left(|M^l|^2_{\rm eff} + |S^{l-1}|^2\right)^{\frac{n_l+1}{2}}
+        + \left(|M^l|^2_{\rm eff} + |S^l|^2\right)^{\frac{n_l+1}{2}}
+        \right] dx
+
+    with :math:`S^0` the basal stress and :math:`S^L = 0` at the surface.
+    Summed over the column it replaces :func:`viscous_power`,
+    :func:`interlayer_power` and :func:`basal_stress_power`, and equals
+    them for linear ice.  Each half-layer shears under its own layer's law,
+    so every interface is in series, and the bottom half-layer shears on a
+    sliding bed too (add :func:`friction_power` for the sliding itself).
+    It also keeps the membrane block of the Jacobian invertible at
+    :math:`M = 0` wherever the ice shears.
+
+    Parameters
+    ----------
+    membrane_stress : this layer's membrane stress
+    stress_below : the stress on its lower face (the basal stress for the
+        bottom layer)
+    stress_above : the stress on its upper face, ``None`` for the top layer
+    thickness, flow_law_coefficient, flow_law_exponent : this layer's
+    measure : optional
+        ``dx`` (the default); the vertex measure for nodal stresses.
+    """
+    M = kwargs["membrane_stress"]
+    S_lo = kwargs["stress_below"]
+    S_hi = kwargs.get("stress_above")
+    h = kwargs["thickness"]
+    A, n = map(kwargs.get, ("flow_law_coefficient", "flow_law_exponent"))
+    measure = kwargs.get("measure", dx)
+
+    M_2 = _membrane_invariant(M)
+    return (_half_layer_power(M_2, S_lo, h, A, n)
+            + _half_layer_power(M_2, S_hi, h, A, n)) * measure
+
+
+def slope_coupling(**kwargs):
+    r"""Return the coupling of membrane stress and vertical shear on
+    sloping layers
+
+    The layers follow the bed, so a layer's velocity gradient is taken
+    along a surface that slopes, relative to the ice surface, by
+    :math:`\nabla z_l`, while the first-order strain rate is the one at
+    constant depth,
+
+    .. math::
+        \dot\varepsilon\big|_z = \dot\varepsilon(u^l)
+        - \operatorname{sym}\left(\nabla z_l \otimes \partial_z u\right).
+
+    :func:`momentum_balance` pairs the membrane stress with the first
+    term; this adds the second,
+
+    .. math::
+        \sum_l \int h^l\, M^l : \operatorname{sym}\left(\nabla z_l
+        \otimes \partial_z u\big|_l\right) dx,
+
+    with :math:`z_l = -\left(\sum_{k>l} h^k + h^l/2\right)` the depth of
+    the middle of layer :math:`l` below the surface and
+    :math:`\partial_z u|_l` the mean of the velocity gradients on its two
+    faces: the jump between layer midpoints at an interior face, zero at
+    the surface, and on a frozen bed the bottom layer's velocity over its
+    half thickness.  On a sliding bed the bottom layer takes the gradient
+    of its upper face.  It is bilinear in stress and velocity, so the
+    system stays the derivative of one action.  It vanishes where the
+    layers parallel the surface -- a uniform slab on any slope stays exact
+    -- and without it a column on a sloping bed does not converge to the
+    first-order solution as layers are added (ISMIP-HOM B levels off 16 %
+    from it at 10 km).  Measuring the slope from the surface rather than
+    the horizontal changes the strain rate only at second order in the
+    surface slope, the order the first-order model itself neglects.
+
+    Parameters
+    ----------
+    velocities, membrane_stresses, thicknesses : lists, bottom to top
+    frozen_bed : bool
+        No slip at the bed (default ``False``).
+    """
+    u = kwargs["velocities"]
+    M = kwargs["membrane_stresses"]
+    h = kwargs["thicknesses"]
+    frozen = kwargs.get("frozen_bed", False)
+    L = len(h)
+    if not (len(u) == len(M) == L):
+        raise ValueError("need one velocity, membrane stress and thickness per layer")
+
+    rates = [(u[l + 1] - u[l]) / ((h[l] + h[l + 1]) / 2) for l in range(L - 1)]
+    form = 0
+    for l in range(L):
+        above = sum(h[k] for k in range(l + 1, L)) if l < L - 1 else 0
+        z_l = -(above + h[l] / 2)
+        if l > 0:
+            below_rate = rates[l - 1]
+        elif frozen:
+            below_rate = u[0] / (h[0] / 2)
+        else:
+            below_rate = None
+        above_rate = rates[l] if l < L - 1 else 0 * u[l]
+        if below_rate is None:
+            if L == 1:
+                continue
+            dudz = above_rate
+        else:
+            dudz = (below_rate + above_rate) / 2
+        form = form + h[l] * inner(M[l], sym(ufl.outer(grad(z_l), dudz)))
+    if form == 0:
+        return Constant(0.0) * dx(ufl.domain.extract_unique_domain(u[0]))
+    return form * dx
 
 
 def interlayer_power(**kwargs):

@@ -28,6 +28,39 @@ from ismip_hom_d import solve_ismip_hom_d
 DATA_DIR = Path("/tmp/ismip_hom_data/ismip_all")
 
 
+#: Cells per side of the periodic mesh.  D's speed peak over the slippery
+#: spot is narrow at long wavelengths: at 160 km it reaches 219, 234 and
+#: 237 m/yr on 20, 40 and 80 cells (intercomparison median 238).  B does not
+#: change with the mesh beyond 40 cells.
+NX_B = 40
+NX_D = 80
+
+#: Legend label of the intercomparison band drawn by :func:`spread`.
+SPREAD_LABEL = "Intercomp. 16-84 %"
+
+
+def spread(profiles):
+    r"""Median and 16th-84th percentile band of the submissions at each x.
+
+    A few submissions sit far from the rest (in experiment D at 80 km one
+    peaks at 192 m/yr and one at 61 m/yr, against a cluster near 97), so the
+    median and percentiles describe the intercomparison better than the
+    mean and standard deviation, which those outliers drag."""
+    lo, median, hi = np.nanpercentile(np.asarray(profiles), [16, 50, 84], axis=0)
+    return lo, median, hi
+
+
+def in_phase(x_common, vx):
+    r"""Experiment D's friction vanishes at x = 3L/4, so every speed profile
+    peaks there.  Five submissions (rhi1-rhi5) peak at L/4 instead, with the
+    same speeds: half a period out of phase, an x origin or friction sign of
+    their own.  Shift any profile that peaks in the first half of the period
+    by half a period."""
+    if np.argmax(vx) >= len(vx) // 2:
+        return vx
+    return np.interp((x_common + 0.5) % 1.0, x_common, vx)
+
+
 def load_intercomparison_data(experiment, wavelength_km):
     r"""Load all model submissions for an ISMIP-HOM experiment.
 
@@ -99,6 +132,9 @@ def load_intercomparison_data(experiment, wavelength_km):
                 except Exception:
                     continue
 
+    if experiment == "d":
+        vx_surf_all = [in_phase(x_common, v) for v in vx_surf_all]
+        vx_base_all = [in_phase(x_common, v) for v in vx_base_all]
     return x_common, vx_surf_all, vx_base_all
 
 
@@ -117,16 +153,15 @@ def plot_experiment_b():
         x_ref, vx_surf_all, _ = load_intercomparison_data("b", Lkm)
         if vx_surf_all:
             vx_arr = np.array(vx_surf_all)
-            mean = np.mean(vx_arr, axis=0)
-            std = np.std(vx_arr, axis=0)
-            ax.fill_between(x_ref, mean - std, mean + std, alpha=0.3, color="gray",
-                            label="Intercomp. $\\pm 1\\sigma$")
-            ax.plot(x_ref, mean, "k--", lw=1, label="Intercomp. mean")
+            lo, median, hi = spread(vx_arr)
+            ax.fill_between(x_ref, lo, hi, alpha=0.3, color="gray",
+                            label=SPREAD_LABEL)
+            ax.plot(x_ref, median, "k--", lw=1, label="Intercomp. median")
 
         # Our multilayer results
         for nl in layer_counts:
             print(f"  B: L={Lkm}km, layers={nl}...", flush=True)
-            u_surf, x_hat, _ = solve_ismip_hom_b(Lx, nl, nx=20)
+            u_surf, x_hat, _ = solve_ismip_hom_b(Lx, nl, nx=NX_B)
             ax.plot(x_hat, u_surf, color=colors[nl], lw=1.5,
                     label=f"Multilayer L={nl}")
 
@@ -159,24 +194,22 @@ def plot_experiment_d():
         x_ref, vx_surf_all, vx_base_all = load_intercomparison_data("d", Lkm)
         if vx_surf_all:
             vx_s = np.array(vx_surf_all)
-            mean_s = np.mean(vx_s, axis=0)
-            std_s = np.std(vx_s, axis=0)
-            ax_s.fill_between(x_ref, mean_s - std_s, mean_s + std_s,
+            lo_s, median_s, hi_s = spread(vx_s)
+            ax_s.fill_between(x_ref, lo_s, hi_s,
                               alpha=0.3, color="gray",
-                              label="Intercomp. $\\pm 1\\sigma$")
-            ax_s.plot(x_ref, mean_s, "k--", lw=1, label="Intercomp. mean")
+                              label=SPREAD_LABEL)
+            ax_s.plot(x_ref, median_s, "k--", lw=1, label="Intercomp. median")
         if vx_base_all:
             vx_b = np.array(vx_base_all)
-            mean_b = np.mean(vx_b, axis=0)
-            std_b = np.std(vx_b, axis=0)
-            ax_b.fill_between(x_ref, mean_b - std_b, mean_b + std_b,
+            lo_b, median_b, hi_b = spread(vx_b)
+            ax_b.fill_between(x_ref, lo_b, hi_b,
                               alpha=0.3, color="gray")
-            ax_b.plot(x_ref, mean_b, "k--", lw=1)
+            ax_b.plot(x_ref, median_b, "k--", lw=1)
 
         # Our multilayer results
         for nl in layer_counts:
             print(f"  D: L={Lkm}km, layers={nl}...", flush=True)
-            u_surf, u_base, x_hat, _ = solve_ismip_hom_d(Lx, nl, nx=20)
+            u_surf, u_base, x_hat, _ = solve_ismip_hom_d(Lx, nl, nx=NX_D)
             ax_s.plot(x_hat, u_surf, color=colors[nl], lw=1.5,
                       label=f"Multilayer L={nl}")
             ax_b.plot(x_hat, u_base, color=colors[nl], lw=1.5)
